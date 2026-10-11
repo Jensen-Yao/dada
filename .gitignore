@@ -1,0 +1,16 @@
+# 依赖
+node_modules/
+
+# 运行时数据（数据库、上传文件）
+server/data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# 日志与临时文件
+*.log
+.DS_Store
+nohup.out
+
+# 截图产物（本地验证用）
+/tmp/dada-shots/

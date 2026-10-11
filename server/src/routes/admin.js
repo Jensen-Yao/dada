@@ -1,0 +1,107 @@
+import { Router } from 'express';
+import { db, now } from '../db.js';
+import { requireAuth, ok, warnUser, notify } from '../util.js';
+
+export const adminRouter = Router();
+
+function requireAdmin(req, res, next) {
+  if (!req.user.is_admin) return res.status(403).json({ error: '需要管理员权限' });
+  next();
+}
+adminRouter.use(requireAuth, requireAdmin);
+
+// ---------- 数据看板 ----------
+adminRouter.get('/stats', (_req, res) => {
+  const t = now();
+  const day = 86400000;
+  const stat = (sql, ...vals) => db.prepare(sql).get(...vals).c;
+  res.json(ok({
+    users: stat('SELECT COUNT(*) c FROM users'),
+    active_users: stat('SELECT COUNT(*) c FROM users WHERE last_active_at > ?', t - 7 * day),
+    banned_users: stat("SELECT COUNT(*) c FROM users WHERE status = 'banned'"),
+    posts: stat('SELECT COUNT(*) c FROM posts'),
+    open_posts: stat("SELECT COUNT(*) c FROM posts WHERE status = 'open'"),
+    done_posts: stat("SELECT COUNT(*) c FROM posts WHERE status = 'done'"),
+    joins: stat("SELECT COUNT(*) c FROM joins WHERE status = 'approved'"),
+    messages: stat('SELECT COUNT(*) c FROM messages'),
+    pending_reports: stat("SELECT COUNT(*) c FROM reports WHERE status = 'pending'"),
+    new_users_7d: stat('SELECT COUNT(*) c FROM users WHERE created_at > ?', t - 7 * day),
+  }));
+});
+
+// ---------- 举报队列 ----------
+adminRouter.get('/reports', (req, res) => {
+  const status = ['pending', 'resolved'].includes(req.query.status) ? req.query.status : 'pending';
+  const rows = db.prepare(`
+    SELECT r.*, ru.nickname reporter_nickname FROM reports r JOIN users ru ON r.reporter_id = ru.id
+    WHERE r.status = ? ORDER BY r.id DESC LIMIT 200
+  `).all(status);
+  // 补充举报目标摘要
+  const list = rows.map((r) => {
+    let target_summary = '';
+    try {
+      if (r.target_type === 'user') {
+        const u = db.prepare('SELECT nickname, status FROM users WHERE id = ?').get(r.target_id);
+        target_summary = u ? `${u.nickname}（${u.status === 'banned' ? '已封禁' : '正常'}）` : '已删除';
+      } else if (r.target_type === 'post') {
+        const p = db.prepare('SELECT title FROM posts WHERE id = ?').get(r.target_id);
+        target_summary = p ? p.title : '已删除';
+      } else if (r.target_type === 'message') {
+        const m = db.prepare('SELECT content FROM messages WHERE id = ?').get(r.target_id);
+        target_summary = m ? m.content.slice(0, 40) : '已删除';
+      } else if (r.target_type === 'comment') {
+        const c = db.prepare('SELECT content FROM comments WHERE id = ?').get(r.target_id);
+        target_summary = c ? c.content.slice(0, 40) : '已删除';
+      }
+    } catch { /* ignore */ }
+    return { ...r, target_summary };
+  });
+  res.json(ok(list));
+});
+
+// ---------- 处理举报（警告/封禁/驳回） ----------
+adminRouter.post('/reports/:id/resolve', (req, res) => {
+  const r = db.prepare('SELECT * FROM reports WHERE id = ?').get(parseInt(req.params.id));
+  if (!r) return res.status(404).json({ error: '举报不存在' });
+  if (r.status === 'resolved') return res.status(400).json({ error: '该举报已处理' });
+  const { action } = req.body || {}; // warn | ban | dismiss
+  if (!['warn', 'ban', 'dismiss'].includes(action)) return res.status(400).json({ error: '处理动作不合法' });
+
+  if (action === 'warn' && r.target_type === 'user') {
+    warnUser(r.target_id, `被举报「${r.reason}」核实成立`);
+  } else if (action === 'ban') {
+    if (r.target_type === 'user') {
+      db.prepare("UPDATE users SET status = 'banned' WHERE id = ?").run(r.target_id);
+      notify(r.target_id, 'warning', '账号已被封禁', '因违反社区公约，账号已被封禁。');
+    } else if (r.target_type === 'post') {
+      db.prepare("UPDATE posts SET status = 'closed' WHERE id = ?").run(r.target_id);
+      const p = db.prepare('SELECT * FROM posts WHERE id = ?').get(r.target_id);
+      if (p) warnUser(p.user_id, '发布的搭局违规被下架');
+    } else if (r.target_type === 'comment') {
+      db.prepare('DELETE FROM comments WHERE id = ?').run(r.target_id);
+    } else if (r.target_type === 'message') {
+      db.prepare("UPDATE messages SET content = '[该消息因违规已被撤回]' WHERE id = ?").run(r.target_id);
+    }
+  }
+  db.prepare("UPDATE reports SET status = 'resolved' WHERE id = ?").run(r.id);
+  notify(r.reporter_id, 'report_result', '举报已处理', `你举报的「${r.reason}」已被处理（${{ warn: '已警告对方', ban: '已封禁/下架', dismiss: '未发现违规' }[action]}）`, {});
+  res.json(ok({ resolved: true, action }));
+});
+
+// ---------- 用户管理 ----------
+adminRouter.get('/users', (req, res) => {
+  const q = `%${String(req.query.keyword || '').trim()}%`;
+  const rows = db.prepare(`
+    SELECT id, username, nickname, gender, city, credit, warnings, status, is_admin, verify_student, verify_real, created_at
+    FROM users WHERE nickname LIKE ? OR username LIKE ? ORDER BY id DESC LIMIT 100
+  `).all(q, q);
+  res.json(ok(rows));
+});
+
+adminRouter.post('/users/:id/ban', (req, res) => {
+  const u = db.prepare('SELECT * FROM users WHERE id = ?').get(parseInt(req.params.id));
+  if (!u) return res.status(404).json({ error: '用户不存在' });
+  if (u.is_admin) return res.status(400).json({ error: '不能封禁管理员' });
+  db.prepare("UPDATE users SET status = ? WHERE id = ?").run(u.status === 'banned' ? 'active' : 'banned', u.id);
+  res.json(ok({ banned: u.status !== 'banned' }));
+});

@@ -1,0 +1,63 @@
+/* ================= 搭搭 API 客户端 ================= */
+const API = (() => {
+  const TOKEN_KEY = 'dada_token';
+  const USER_KEY = 'dada_user';
+
+  function token() { return localStorage.getItem(TOKEN_KEY) || ''; }
+  function savedUser() { try { return JSON.parse(localStorage.getItem(USER_KEY)); } catch { return null; } }
+
+  async function request(method, path, body) {
+    const res = await fetch('/api' + path, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token() ? { Authorization: `Bearer ${token()}` } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    let json = null;
+    try { json = await res.json(); } catch { /* non-json */ }
+    if (res.status === 401) {
+      // 登录态失效，清除并跳登录（聊天页等场景除外）
+      localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem(USER_KEY);
+      if (!location.hash.startsWith('#/login')) location.hash = '#/login';
+      throw new Error(json?.error || '请先登录');
+    }
+    if (!res.ok || !json?.ok) throw new Error(json?.error || `请求失败(${res.status})`);
+    return json.data;
+  }
+
+  const get = (p) => request('GET', p);
+  const post = (p, b) => request('POST', p, b || {});
+  const put = (p, b) => request('PUT', p, b || {});
+  const del = (p) => request('DELETE', p);
+
+  async function uploadAvatar(file) {
+    const fd = new FormData();
+    fd.append('avatar', file);
+    const res = await fetch('/api/users/me/avatar', {
+      method: 'POST',
+      headers: token() ? { Authorization: `Bearer ${token()}` } : {},
+      body: fd,
+    });
+    const json = await res.json();
+    if (!res.ok || !json.ok) throw new Error(json.error || '上传失败');
+    return json.data;
+  }
+
+  function setSession(t, u) {
+    localStorage.setItem(TOKEN_KEY, t);
+    localStorage.setItem(USER_KEY, JSON.stringify(u));
+  }
+  function clearSession() {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+  }
+
+  return {
+    token, savedUser, setSession, clearSession,
+    get, post, put, del, uploadAvatar,
+    isLogin: () => !!token(),
+  };
+})();

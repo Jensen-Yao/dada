@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="theme-color" content="#FF7A45">
+  <title>搭搭 · 找到你的搭子</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤝</text></svg>">
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <div id="app">
+    <div id="page-container"></div>
+    <nav id="tabbar" class="hidden">
+      <button class="tab" data-tab="square">
+        <span class="tab-icon">🧭</span><span class="tab-label">广场</span>
+      </button>
+      <button class="tab" data-tab="discover">
+        <span class="tab-icon">✨</span><span class="tab-label">发现</span>
+      </button>
+      <button class="tab tab-publish" data-tab="publish">
+        <span class="tab-icon">➕</span><span class="tab-label">发布</span>
+      </button>
+      <button class="tab" data-tab="chat">
+        <span class="tab-icon">💬</span><span class="tab-label">消息</span><i id="chat-badge" class="badge hidden"></i>
+      </button>
+      <button class="tab" data-tab="me">
+        <span class="tab-icon">👤</span><span class="tab-label">我的</span><i id="me-badge" class="badge hidden"></i>
+      </button>
+    </nav>
+  </div>
+  <script src="/js/api.js"></script>
+  <script src="/js/ui.js"></script>
+  <script src="/js/ws.js"></script>
+  <script src="/js/app.js"></script>
+  <script src="/js/pages/login.js"></script>
+  <script src="/js/pages/square.js"></script>
+  <script src="/js/pages/post.js"></script>
+  <script src="/js/pages/publish.js"></script>
+  <script src="/js/pages/discover.js"></script>
+  <script src="/js/pages/chat.js"></script>
+  <script src="/js/pages/conv.js"></script>
+  <script src="/js/pages/me.js"></script>
+  <script src="/js/pages/user.js"></script>
+  <script src="/js/pages/misc.js"></script>
+  <script src="/js/pages/admin.js"></script>
+</body>
+</html>

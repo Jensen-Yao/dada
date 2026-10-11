@@ -1,0 +1,24 @@
+{
+  "name": "dada-server",
+  "version": "1.0.0",
+  "description": "搭搭 App 后端服务（搭子社交平台）",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "seed": "node src/seed.js",
+    "test": "node --test test/"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.4.0",
+    "ws": "^8.18.0"
+  }
+}
