@@ -352,14 +352,15 @@ test('用户：拉黑列表与取消拉黑', async () => {
   assert.equal(list2.json.data.length, 0, 'blocks list should be empty after unblock');
 });
 
-test('帖子：cover与aspect字段存在且确定性（id%3 / id%2 公式）', async () => {
+test('帖子：cover与aspect字段存在且确定性（id%3 三级兜底公式）', async () => {
   const created = await api('POST', '/api/posts', {
     category: 'food', title: 'QA封面确定性无图局', content: '无配图帖', city: '北京',
   }, tokenA);
   assert.equal(created.status, 200);
   const pid = created.json.data.id;
   const expectAspect = ['3:4', '1:1', '4:3'][pid % 3];
-  const expectCover = `/img/covers/food${pid % 2 ? '-2' : ''}.svg`;
+  // PC-03 三级兜底：无配图 food 帖 → 分类实拍照 food-{(id%3)+1}.jpg（按 id 确定性取张）
+  const expectCover = `/img/photos/food-${(pid % 3) + 1}.jpg`;
   const r1 = await api('GET', `/api/posts/${pid}`);
   const r2 = await api('GET', `/api/posts/${pid}`);
   for (const [i, r] of [r1, r2].entries()) {
@@ -367,10 +368,13 @@ test('帖子：cover与aspect字段存在且确定性（id%3 / id%2 公式）', 
     assert.ok(r.json.data.cover, 'cover should exist');
     assert.ok(r.json.data.aspect, 'aspect should exist');
     assert.equal(r.json.data.aspect, expectAspect, `aspect = ASPECTS[id % 3] (request #${i + 1})`);
-    assert.equal(r.json.data.cover, expectCover, `cover follows id parity formula (request #${i + 1})`);
+    assert.equal(r.json.data.cover, expectCover, `cover follows photo fallback formula (request #${i + 1})`);
   }
   assert.equal(r1.json.data.cover, r2.json.data.cover, 'same id twice → identical cover');
   assert.equal(r1.json.data.aspect, r2.json.data.aspect, 'same id twice → identical aspect');
+  // 有配图的帖子 cover 命中 images[0]，不落照片层
+  const seeded = await api('GET', '/api/posts?keyword=日料放题');
+  assert.equal(seeded.json.data.list[0].cover, seeded.json.data.list[0].images[0], 'images[0] wins over photo fallback');
 });
 
 test('帖子：多图帖返回images数组', async () => {

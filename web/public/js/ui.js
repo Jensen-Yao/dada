@@ -70,8 +70,20 @@ const UI = (() => {
     return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   }
 
+  // ---------- 头像（PC-04）：<img> 带 onerror 三级降级，防死循环 ----------
+  // 降级链：photo-{n}.jpg（真人照）→ u{n}.svg（C5 旧资产，按序号推导）→ 字母头像 div
+  function avatarImg(src, nickname = '?') {
+    const m = String(src || '').match(/photo-(\d+)\.jpg$/);
+    const ch = esc(String(nickname || '?').trim().charAt(0) || '?');
+    const toLetter = `this.onerror=null;var d=document.createElement('div');d.className='avatar';d.textContent='${ch}';this.replaceWith(d);`;
+    const js = m
+      ? `if(!this.dataset.f){this.dataset.f=1;this.src='/img/avatars/u${m[1]}.svg';}else{${toLetter}}`
+      : toLetter;
+    return `<img src="${esc(src)}" alt="" onerror="${esc(js)}">`;
+  }
+
   function avatarHTML(user, size = '') {
-    if (user?.avatar) return `<div class="avatar ${size}"><img src="${esc(user.avatar)}" alt=""></div>`;
+    if (user?.avatar) return `<div class="avatar ${size}">${avatarImg(user.avatar, user?.nickname)}</div>`;
     const ch = (user?.nickname || '?').trim().charAt(0) || '?';
     return `<div class="avatar ${size}">${esc(ch)}</div>`;
   }
@@ -151,9 +163,15 @@ const UI = (() => {
       : `<svg ${common} fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
   }
 
-  // ---------- 封面/宽高比兜底（BE-05 联调契约：与后端 postView 同公式） ----------
+  // ---------- 封面/宽高比兜底（BE-05 联调契约 + PC-03 三级兜底：与后端 coverFields 同公式） ----------
+  // cover 兜底链：p.cover → images[0] → 分类实拍照 /img/photos/{category}-{id%N+1}.jpg → 旧 SVG（C5 终兜底）
   const ASPECTS = ['3:4', '1:1', '4:3'];
-  const coverOf = (p) => p.cover || p.images?.[0] || `/img/covers/${p.category}${p.id % 2 ? '-2' : ''}.svg`;
+  // 每分类实拍照片数（与 server/src/routes/posts.js PHOTO_N 同步）
+  const PHOTO_N = { food: 3, sports: 3, study: 2, travel: 3, live: 3, game: 3, movie: 2,
+                    photo: 2, pet: 3, coffee: 3, shopping: 2, boardgame: 3, commute: 3, other: 2 };
+  const coverOf = (p) => p.cover || p.images?.[0]
+    || (PHOTO_N[p.category] ? `/img/photos/${p.category}-${(p.id % PHOTO_N[p.category]) + 1}.jpg` : null)
+    || `/img/covers/${p.category}${p.id % 2 ? '-2' : ''}.svg`;
   const aspectOf = (p) => p.aspect || ASPECTS[p.id % 3];
 
   // ---------- 瀑布流卡片（H5-07）：大图封面 + 2行标题 + 作者行 ----------
@@ -186,7 +204,7 @@ const UI = (() => {
     } else {
       const nick = p.author?.nickname || '搭友';
       const avatar = p.author?.avatar
-        ? `<span class="pin-avatar"><img src="${esc(p.author.avatar)}" alt=""></span>`
+        ? `<span class="pin-avatar">${avatarImg(p.author.avatar, nick)}</span>`
         : `<span class="pin-avatar">${esc(nick.charAt(0))}</span>`;
       const liked = !!p.liked;
       foot = `${avatar}<span class="pin-name">${esc(nick)}</span>`
@@ -213,5 +231,5 @@ const UI = (() => {
     return `<div class="wf">${Array.from({ length: n }, (_, i) => `<div class="wf-item"><div class="skeleton" style="height:${hs[i % hs.length]}px"></div></div>`).join('')}</div>`;
   }
 
-  return { toast, sheet, confirm, esc, timeAgo, hhmm, avatarHTML, genderBadge, creditLabel, empty, loading, requireLogin, icon, coverOf, aspectOf, pinCard, wfSkeleton };
+  return { toast, sheet, confirm, esc, timeAgo, hhmm, avatarImg, avatarHTML, genderBadge, creditLabel, empty, loading, requireLogin, icon, coverOf, aspectOf, pinCard, wfSkeleton };
 })();

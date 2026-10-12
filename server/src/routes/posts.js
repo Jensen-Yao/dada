@@ -13,13 +13,19 @@ import {
 
 export const postsRouter = Router();
 
-// ---------- 封面/比例字段（BE-02/03 确定性规则，禁随机/时间） ----------
-// aspect：按帖子 id 确定性分档（同帖永远同档）；cover：有配图用首图，否则按 id 奇偶选分类封面变体
+// ---------- 封面/比例字段（BE-02/03 + PC-03 三级兜底，确定性规则，禁随机/时间） ----------
+// aspect：按帖子 id 确定性分档（同帖永远同档）
+// cover 兜底链：images[0]（用户配图/seed 真图）→ 分类实拍照 /img/photos/{category}-{id%N+1}.jpg → 旧 SVG（终兜底，C5）
 export const ASPECTS = ['3:4', '1:1', '4:3'];
+// 每分类实拍照片数（与 docs/product-spec.md §F.1 清单一致，新增照片时同步此表）
+export const PHOTO_N = { food: 3, sports: 3, study: 2, travel: 3, live: 3, game: 3, movie: 2,
+                         photo: 2, pet: 3, coffee: 3, shopping: 2, boardgame: 3, commute: 3, other: 2 };
 export function coverFields(p) {
   const images = safeJSON(p.images, []);
+  const n = PHOTO_N[p.category] || 0;
+  const photo = n ? `/img/photos/${p.category}-${(p.id % n) + 1}.jpg` : null;
   return {
-    cover: images[0] || `/img/covers/${p.category}${p.id % 2 ? '-2' : ''}.svg`,
+    cover: images[0] || photo || `/img/covers/${p.category}${p.id % 2 ? '-2' : ''}.svg`,
     aspect: ASPECTS[p.id % 3],
   };
 }

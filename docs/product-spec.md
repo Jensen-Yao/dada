@@ -541,3 +541,217 @@ UI.aspectOf = (p) => p.aspect || ASPECTS[p.id % 3];
 | M6 | Capacitor 工程（APP-06~08） | M4 |
 
 > 文件归属与 FE-A/FE-B 分工见交付说明（app.css 归 FE-A；desktop.css/extensions.css、app.js、manifest/sw、conv/chat/me/publish/misc/login/admin 归 FE-B；square/post/discover/user/ui.js 归 FE-A），保证双人不同文件并行。
+
+---
+
+## F. v2.3 真实图片内容升级（PC-xx）
+
+> 版本：v2.3 ｜ 日期：2026-10-12 ｜ 负责人：PM ｜ 需求来源：用户反馈 —— "app 展示页要比如活动里用实际图片或者类似小红书那样的帖子，现在都是表情包，可以上网找一些免费素材"。
+> 技术前提（已验证）：`images.unsplash.com` / `images.pexels.com` 均可访问；Unsplash 支持 imgix 参数（`?w=800&q=70&fm=jpg`）直出指定尺寸压缩图。
+> 里程碑：PC-01 → PC-03 为一条主线（脚本 → seed → cover 公式，约一个迭代日）；PC-04/PC-05 随后（PC-04 为可选档，PC-05 大部分由 PC-01/02/03 自动达成）。
+
+**总原则（本章所有需求的公共约束）**
+
+1. **素材本地化**：全部图片下载进仓库 `web/public/img/`，**禁止热链外网 URL** —— 保证单机部署、断网环境、APK 离线包全部可用（不违反 C4）。
+2. **旧资产零删除**（C5）：`covers/*.svg`（28 张）、`avatars/u*.svg`（10 张）一律保留，全部降级为 onerror / 兜底链的最后一环。
+3. **确定性红线**（BE-04 延续）：`cover` 计算禁用 `Math.random()`/时间；新帖图片分配同样确定性，保证 SWR 缓存与截图基线稳定。
+4. **License 合规**：Unsplash License 允许免费商用、无需署名；仍以 `CREDITS.md` 致谢来源。禁止选用可识别人物肖像作商业宣传语境（演示头像仅作虚构用户头像使用，可接受）。
+
+### F.1 照片清单表（PC-01 / PC-04 的唯一实现依据）
+
+> 实现 agent **照单下载**，逐行对应 `scripts/fetch-photos.mjs` 的 PHOTOS/AVATARS 数组。以下全部 URL 已由 PM 于 2026-10-12 逐一验证 HTTP 200（封面参数实测单张 23-138KB）。
+> 封面统一参数：`?w=800&q=70&fm=jpg`（可追加 `&fit=max` 防小图放大）；头像统一参数：`?w=200&h=200&fit=crop&crop=faces&q=70&fm=jpg`。
+> 语义列 = 选图依据；若下载后发现与语义明显不符（如色情/-logo 水印/语义错位），按同分类备选 ID 替换并在 CREDITS.md 记录变更。
+
+| # | 分类 | 目标文件（web/public/img/photos/） | Unsplash photo-id | 语义（与分类对应） |
+|---|---|---|---|---|
+| 1 | food | food-1.jpg | photo-1504674900247-0877df9cc836 | 聚餐桌菜俯拍（饭搭子局） |
+| 2 | food | food-2.jpg | photo-1553621042-f6e147245754 | 寿司拼盘特写（日料） |
+| 3 | food | food-3.jpg | photo-1414235077428-338989a2e8c0 | 餐厅精致主菜摆盘 |
+| 4 | sports | sports-1.jpg | photo-1476480862126-209bfaa8edc8 | 清晨公路跑步者（晨跑） |
+| 5 | sports | sports-2.jpg | photo-1571019613454-1cb2f99b2d8b | 户外体能训练 |
+| 6 | sports | sports-3.jpg | photo-1517836357463-d25dfeac3438 | 健身房杠铃力量训练 |
+| 7 | study | study-1.jpg | photo-1481627834876-b7833e8f5570 | 图书馆书架通道（自习/国图） |
+| 8 | study | study-2.jpg | photo-1456513080510-7bf3a84b82f8 | 书桌摊开的书与笔记 |
+| 9 | travel | travel-1.jpg | photo-1506905925346-21bda4d32df4 | 雪山山峰远景 |
+| 10 | travel | travel-2.jpg | photo-1551632811-561732d1e306 | 背包客山径徒步 |
+| 11 | travel | travel-3.jpg | photo-1501785888041-af3ef285b470 | 高山湖泊日落 |
+| 12 | live | live-1.jpg | photo-1470229722913-7c0e2dbbafd3 | 音乐节人群举手 |
+| 13 | live | live-2.jpg | photo-1493225457124-a3eb161ffa5f | 演唱会舞台灯光 |
+| 14 | live | live-3.jpg | photo-1516450360452-9312f5e86fc7 | livehouse 紫色灯海 |
+| 15 | game | game-1.jpg | photo-1542751371-adc38448a05e | 电竞馆暗光对战（开黑） |
+| 16 | game | game-2.jpg | photo-1511512578047-dfb367046420 | 霓虹灯游戏手柄 |
+| 17 | game | game-3.jpg | photo-1592840496694-26d035b52b48 | 白色游戏手柄特写 |
+| 18 | movie | movie-1.jpg | photo-1489599849927-2ee91cede3ba | 影院红色座椅（观影） |
+| 19 | movie | movie-2.jpg | photo-1536440136628-849c177e76a1 | 放映机胶片（影院氛围） |
+| 20 | photo | photo-1.jpg | photo-1452587925148-ce544e77e70d | 双手持相机取景（扫街） |
+| 21 | photo | photo-2.jpg | photo-1516035069371-29a1b244cc32 | 复古相机暗调静物 |
+| 22 | pet | pet-1.jpg | photo-1543466835-00a7907e9de1 | 微笑坐姿小狗（遛狗） |
+| 23 | pet | pet-2.jpg | photo-1552053831-71594a27632d | 金毛幼犬 |
+| 24 | pet | pet-3.jpg | photo-1518717758536-85ae29035b6d | 棕色小狗特写 |
+| 25 | coffee | coffee-1.jpg | photo-1509042239860-f550ce710b93 | 拿铁咖啡杯（探店） |
+| 26 | coffee | coffee-2.jpg | photo-1521017432531-fbd92d768814 | 咖啡店内景与客人 |
+| 27 | coffee | coffee-3.jpg | photo-1495474472287-4d71bcdd2085 | 桌面咖啡与咖啡豆 |
+| 28 | shopping | shopping-1.jpg | photo-1441986300917-64674bd600d8 | 服装店衣架陈列（逛街） |
+| 29 | shopping | shopping-2.jpg | photo-1483985988355-763728e1935b | 提购物袋逛街 |
+| 30 | boardgame | boardgame-1.jpg | photo-1610889556528-9a770e32642f | 桌游棋子组件俯拍 |
+| 31 | boardgame | boardgame-2.jpg | photo-1611996575749-79a3a250f948 | 桌游手牌局 |
+| 32 | boardgame | boardgame-3.jpg | photo-1529699211952-734e80c4d42b | 棋盘对弈特写 |
+| 33 | commute | commute-1.jpg | photo-1544620347-c4fd4a3d5957 | 公交/地铁车厢内（通勤） |
+| 34 | commute | commute-2.jpg | photo-1502877338535-766e1452684a | 公路行驶车辆（拼车） |
+| 35 | commute | commute-3.jpg | photo-1519501025264-65ba15a82390 | 城市夜景天际线 |
+| 36 | other | other-1.jpg | photo-1477959858617-67f85cf4f1df | 城市天际线（citywalk/其他局） |
+| 37 | other | other-2.jpg | photo-1449034446853-66c86144b0ad | 城市楼宇黄昏 |
+
+> 合计 37 张：14 分类每类 ≥2（study/movie/photo/shopping/other 为 2 张，其余 3 张），满足"每分类 ≥2、共 ≥32"。
+
+**头像清单（PC-04，web/public/img/avatars/，10 张）**：`photo-{i}.jpg` 与旧 `u{i}.svg` 一一对应（同序号同用户），性别与 seed 用户一致。
+
+| 目标文件 | 对应旧头像 | Unsplash photo-id | 语义 |
+|---|---|---|---|
+| photo-1.jpg | u1.svg（美美/F） | photo-1494790108377-be9c29b29330 | 微笑女生人像 |
+| photo-2.jpg | u2.svg（阿跑/M） | photo-1539571696357-5a69c17a67c6 | 年轻男生人像 |
+| photo-3.jpg | u3.svg（Sherry/F） | photo-1544005313-94ddf0286df2 | 女生人像 |
+| photo-4.jpg | u4.svg（momo/F） | photo-1534528741775-53994a69daeb | 女生人像 |
+| photo-5.jpg | u5.svg（小鱼干/F） | photo-1517841905240-472988babdf9 | 微笑女生人像 |
+| photo-6.jpg | u6.svg（小柯/M） | photo-1500648767791-00dcc994a43e | 年轻男生人像 |
+| photo-7.jpg | u7.svg（老徐/M·摄影师） | photo-1506794778202-cad84cf45f1d | 胡须男生人像 |
+| photo-8.jpg | u8.svg（王大爷/M） | photo-1507003211169-0a1dd7228f2d | 成熟男士人像 |
+| photo-9.jpg | u9.svg（KiKi/F） | photo-1524504388940-b1c1722653e1 | 女生人像 |
+| photo-10.jpg | u10.svg（官方小助手/F） | photo-1438761681033-6461ffad8d80 | 微笑女生人像 |
+
+### PC-01 真实照片封面库（P0）
+
+- **目录与命名**：`web/public/img/photos/{category}-{n}.jpg`（n 从 1 连续编号，与 F.1 清单严格一致）；头像见 PC-04。目录内不得出现清单外的文件。
+- **规格**：JPEG，宽 800px、`q=70`，单张约 20-200KB；总增量与头像合计 **< 15MB**（预算见验收）。
+- **脚本 `scripts/fetch-photos.mjs`**（开发期工具链，Node ≥18 全局 fetch，**零新依赖**，不进 server 运行时）：
+  1. PHOTOS / AVATARS 数组**固化 F.1 全部清单**（file / photo-id / 语义备注三元组），URL 由参数模板拼出，脚本内不写死完整 URL。
+  2. **可重复执行（幂等）**：目标文件已存在且大小 >10KB 时跳过；`--force` 强制重新下载覆盖。
+  3. 下载校验：HTTP 200、`content-type` 为 image/jpeg、JPEG magic bytes（FF D8）、体积 ≥10KB；不满足即删除半成品、计入失败清单，脚本结尾汇总并以非零码退出。
+  4. 生成 `web/public/img/photos/CREDITS.md`：每行 `文件 → https://images.unsplash.com/photo-{id}` + Unsplash License 说明（可商用、无需署名、本仓库致谢）。
+- **验收**：
+  - [ ] `node scripts/fetch-photos.mjs` 产出 37 张封面照 + 10 张头像，文件名与 F.1 清单完全一致
+  - [ ] 重复执行第二次输出"全部跳过"，不重复下载（幂等）；`--force` 可强制重下
+  - [ ] CREDITS.md 存在且覆盖全部 47 个文件；`git` 仓库资产增量 < 15MB（实测预估 ≈ 3-4MB）
+  - [ ] **断网可用**：断开外网启动服务，广场/发现/详情/我的页所有图片正常显示，DevTools Network 无任何外网图片请求
+
+### PC-02 seed 内容真实化（P0）
+
+`server/src/seed.js` 调整（保持现有幂等模式：按 title 判存在，重跑不重复插入）：
+
+**a) 存量 12 条帖子 images 全部替换为真实照片**（`DEMO_MULTI_IMAGES` 表重写为按帖子映射，删除 SVG 引用）：
+
+| 存量帖（title 前缀） | 分类 | 新 images |
+|---|---|---|
+| 周六中午五道口吃日料放题 | food | food-1, food-2, food-3 |
+| 奥森晨跑10km | sports | sports-1, sports-2 |
+| 国图自习搭子 | study | study-1, study-2 |
+| 鼓楼扫街 | photo | photo-1, photo-2 |
+| MAO livehouse独立乐队 | live | live-1, live-2 |
+| 元土城遛狗 | pet | pet-1, pet-3 |
+| 塘朗山徒步 | sports | travel-2, travel-3（徒步语义，以帖文内容为准） |
+| 剧本杀拼车 | boardgame | boardgame-1, boardgame-2 |
+| 成都火锅搭子 | food | food-3, food-2 |
+| 《沙丘3》IMAX | movie | movie-1, movie-2 |
+| 咖啡探店 | coffee | coffee-1, coffee-2, coffee-3 |
+| 国贸到望京通勤拼车 | commute | commute-1, commute-2 |
+
+**b) 新增 ≥12 条新帖**（瀑布流内容量翻倍，24 条起），**内容必须像真实小红书帖子**：口语化标题、具体地点+时间、真实可执行的要求（拒绝"找个搭子"式空话）。实现按下表，文案可润色但地点/时间/性别要求/图片映射不得弱化：
+
+| # | 作者 | 分类 | 城市 | 标题示例（口语化） | 地点 | 时间 | 性别要求 | images |
+|---|---|---|---|---|---|---|---|---|
+| 1 | sherry | travel | 深圳 | 梧桐山夜爬看日出，凌晨三点半好汉坡集合 | 梧桐山好汉坡 | 本周六 03:30 | any | travel-1, travel-3 |
+| 2 | xiaoyu | travel | 杭州 | 五一西湖群山徒步组队，宝石山看日落收工 | 宝石山 | 5月1日 15:00 | any | travel-2, travel-1 |
+| 3 | xiaoke | game | 北京 | 瓦罗兰特开黑五排，白金以上速来 | 五道口 网鱼网咖 | 周五 20:00 | male | game-1, game-3 |
+| 4 | kiki | game | 上海 | 双人成行缺个 P2，通关了我请奶茶 | 网鱼网咖静安店 | 周日 14:00 | any | game-2, game-1 |
+| 5 | meimei | shopping | 成都 | 太古里逛街淘小店，会砍价的优先 | 成都太古里 | 本周六 13:30 | female | shopping-1, shopping-2 |
+| 6 | kiki | movie | 上海 | 大光明电影院二刷《沙丘3》，散场聊剧情 | 大光明电影院 | 本周五 19:30 | any | movie-2, movie-1 |
+| 7 | sherry | coffee | 深圳 | 华侨城创意园咖啡巡礼，一天三家走断腿 | 华侨城创意园 | 本周日 10:30 | female | coffee-2, coffee-3 |
+| 8 | runner | sports | 上海 | 世纪公园羽毛球 2 小时，缺 2 人 AA 场费 | 世纪公园 | 本周日 09:30 | any | sports-2, sports-3 |
+| 9 | meimei | boardgame | 成都 | 玉林路剧本杀《年轮》还缺 1，哭点低勿入 | 玉林路 某某剧本杀 | 本周六 14:00 | any | boardgame-2, boardgame-1 |
+| 10 | xiaoke | other | 北京 | 国博看展搭子，周日上午人少不挤 | 国家博物馆 | 本周日 09:00 | any | other-1, other-2 |
+| 11 | xiaoke | commute | 北京 | 昌平线早高峰拼车，沙河→西二旗 | 沙河站 → 西二旗 | 工作日 07:40 | any | commute-2, commute-1 |
+| 12 | momo | study | 北京 | 清华图书馆期末周占座搭子，互相监督打卡 | 清华图书馆 | 工作日 08:30 | female | study-1, study-2 |
+
+> 城市覆盖：北京/上海/成都/深圳/杭州 全覆盖（帖子 2 为跨城旅行局，符合真实用法，其余帖作者城市与帖城市一致）。性别要求 mixed：any×8 / female×3 / male×1。content/requirements 字段按同风格补写（≥40 字、含具体要求）。
+> 至此 14 个分类每个至少 1 帖（此前 travel/game/shopping/other 为 0 帖）。
+
+**c) 旧 SVG 封面保留**：任何代码不得删除/改名 `covers/*.svg`；前端所有内容 `<img>` 增加 `onerror` 兜底（先切同分类旧 SVG，再切分类 emoji 渐变块），保证本地文件缺失/404 时无破图（C5）。
+
+- **验收**：
+  - [ ] 重新 seed 后 24 帖的 `images` 全部为 `/img/photos/*.jpg`（无 SVG 引用）；多图（≥2 张）帖 ≥6 条
+  - [ ] 新增帖 ≥12 条；城市覆盖北上成深杭；性别要求含 any/female/male 三种
+  - [ ] **随机抽 5 帖进详情页：照片与帖文/分类语义相符**（food=实拍菜品、pet=狗、live=演出现场…），无表情包插画残留
+  - [ ] **瀑布流连续滚动 10 屏无重复感**：同屏不出现两张相同封面；同分类封面交替使用变体
+  - [ ] 手动删掉某张 photo-*.jpg 模拟 404：前端兜底到同分类旧 SVG，无破图
+
+### PC-03 封面兜底链调整（BE cover 公式 + FE 同步）
+
+`server/src/routes/posts.js` 的 `coverFields()` 升级为三级兜底（`misc.js` 的 recommend/for-you 复用 `coverFields`，一处改动自动同步）：
+
+```js
+// 每分类照片数（与 F.1 清单一致，新增照片时同步此表）
+const PHOTO_N = { food:3, sports:3, study:2, travel:3, live:3, game:3, movie:2,
+                  photo:2, pet:3, coffee:3, shopping:2, boardgame:3, commute:3, other:2 };
+export function coverFields(p) {
+  const images = safeJSON(p.images, []);
+  const n = PHOTO_N[p.category] || 0;
+  const photo = n ? `/img/photos/${p.category}-${(p.id % n) + 1}.jpg` : null;   // 按 id 确定性取一张
+  return {
+    cover: images[0] || photo || `/img/covers/${p.category}${p.id % 2 ? '-2' : ''}.svg`,
+    aspect: ASPECTS[p.id % 3],
+  };
+}
+```
+
+- 优先级：`images[0]`（用户配图/seed 真图）→ 分类实拍照（按 id 取模确定性选张）→ 旧 SVG（终兜底）。
+- FE 侧 `UI.coverOf`（BE-05 契约）同步为同一三级规则；`UI.aspectOf` 不变。
+- 兼容性：存量 DB 中 images 已是 SVG 的旧库不受影响（`images[0]` 命中仍显示 SVG）；只对**无配图**的帖子才落到照片层；23 个测试必须全绿（C3）。
+- **验收**：
+  - [ ] `GET /posts`、`/recommend`、`/for-you`：无配图帖 cover = `/img/photos/{category}-{n}.jpg`；同 id 多次请求值恒定（确定性）
+  - [ ] 用户发布不带图的新帖，广场封面为对应分类实拍照（非表情包）
+  - [ ] 存量库（images 为 SVG 的旧数据）展示不回归（C5）；`cd server && npm test` 23 passed
+  - [ ] FE 在 mock 掉 cover 字段时兜底规则与 BE 一致（BE-05 契约复测）
+
+### PC-04 头像升级为真人照片（P1 · 可选档）
+
+- 按 F.1 头像清单下载 10 张至 `web/public/img/avatars/photo-{i}.jpg`（`?w=200&h=200&fit=crop&crop=faces`，方形人脸裁切，单张 <30KB）。
+- `seed.js` 用户表 avatar 字段：`/img/avatars/u{n}.svg` → `/img/avatars/photo-{n}.jpg`（序号一一对应，性别匹配见清单）；仅影响新 seed，存量 DB 不强制迁移。
+- FE `ui.js` 抽 `UI.avatarImg(src, fallbackSrc)` 帮助函数：`<img>` 携带 `onerror`（首败切 fallbackSrc 即对应 `u{n}.svg`，再败清 src 显示昵称首字），`avatarHTML()` 与 `pinCard()` 的头像统一走该函数；其余头像调用点（聊天、评论区）同批替换。
+- **验收**：
+  - [ ] 10 个演示用户在广场/详情/聊天/我的页头像均为真人照片
+  - [ ] 手动将 photo-1.jpg 改名模拟 404：对应头像兜底为 u1.svg，无破图；恢复后正常
+  - [ ] `u1-u10.svg` 文件保留在仓库（C5），未改名的存量用户头像不受影响
+
+### PC-05 详情页与个人页实拍观感（P1）
+
+依赖 PC-01/02/03 达成，本条为观感验收档 + 少量补齐：
+
+- **多图帖 ≥4 条**：由 PC-02 表直接满足（存量 4 条 3 图/2 图以上 + 新帖 11 条双图）；详情页轮播（H5-10）每帖均显示 `n/m` 页码且可滑动翻页。
+- **me 页网格实拍**：`UI.coverOf` 升级后，「发布/参加」3 列网格（H5-13）自动使用实拍封面；检查无 SVG 表情包封面残留。
+- **轮播图 onerror 兜底**：详情页 gallery 每张 `<img>` 带 onerror → 同分类旧 SVG → 分类 emoji 渐变块（与 PC-02c 同一约定）。
+- **验收**：
+  - [ ] 随机点开 3 条多图帖：轮播 n/m 正确、滑动流畅、图片全部为实拍
+  - [ ] me 页「发布/参加」网格全部为实拍封面（方形裁切不变形）
+  - [ ] 桌面端（≥1080px 四列瀑布流）同步抽查，无表情包封面
+
+### F.6 验收清单（v2.3 汇总，PM 逐项勾选）
+
+- [ ] PC-01 脚本幂等可重跑，47 个文件（37 封面 + 10 头像）与 F.1 清单一致
+- [ ] PC-01 仓库资产增量 < 15MB；CREDITS.md 覆盖全部文件
+- [ ] PC-01 断网（无外网）启动：全站图片正常，零外链请求
+- [ ] PC-02 24 帖 images 全实拍；新增 ≥12 帖；五城覆盖；性别要求 mixed
+- [ ] PC-02 随机抽 5 帖：详情页照片与分类语义相符
+- [ ] PC-02 瀑布流连续滚动 10 屏无重复感
+- [ ] PC-03 cover 三级兜底生效且确定性；recommend/for-you 一致；23 测试全绿；旧数据不回归
+- [ ] PC-04 头像真人化 + onerror 兜底无破图（可选档，未做则此项记"跳过"）
+- [ ] PC-05 多图帖轮播 n/m 有内容；me 页网格实拍
+- [ ] 全局回归：`covers/*.svg`、`avatars/u*.svg` 全部路径仍 200（C5）；移动端截图走查与 v2.2 基线无意外 diff
+
+### F.7 Roadmap 建议（P2 · 供后续迭代排期，本版不做）
+
+1. **P2-1 发布端图片体验**：发布页支持多图拖拽排序 + 前端 canvas 压缩（长边 1200/q75）再上传，省带宽并保证用户图与 seed 图观感一致；带图发布率进运营看板。
+2. **P2-2 封面点击率数据闭环**：postView 曝光/点击埋点，admin 看板加「封面点击率 TOP10」，用数据反哺 F.1 清单的选图与替换节奏。
+3. **P2-3 照片库季节化扩容**：每分类补至 4 张（冬滑雪/夏露营等季节变体），按月份确定性切换变体，保持瀑布流新鲜感而不破坏确定性红线。
+4. **P2-4 双源容灾**：fetch-photos.mjs 增加 Pexels 备用 URL 列与失败自动切换，避免 Unsplash 单图下架造成素材缺口；CREDITS.md 记录双源。
+5. **P2-5 UGC 图片安全审核**：用户上传图接入与敏感词同级的审核队列（先机审后人工），防止实拍化后图片成为新的安全风险面。
