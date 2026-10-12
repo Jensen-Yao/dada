@@ -55,7 +55,7 @@ miscRouter.get('/recommend', optionalAuth, (req, res) => {
     const liked = viewer ? !!db.prepare('SELECT 1 FROM likes WHERE user_id = ? AND post_id = ?').get(viewer.id, p.id) : false;
     return {
       id: p.id, title: p.title, category: p.category,
-      category_name: CATEGORY_MAP[p.category]?.name, category_emoji: CATEGORY_MAP[p.category]?.emoji,
+      category_name: CATEGORY_MAP[p.category]?.name, category_icon: CATEGORY_MAP[p.category]?.icon,
       city: p.city, meet_time: p.meet_time, status: p.status,
       author: { id: author.id, nickname: author.nickname, avatar: author.avatar, gender: author.gender, credit: author.credit },
       likes_count: p.likes_count, liked,
@@ -94,7 +94,7 @@ miscRouter.get('/for-you', requireAuth, (req, res) => {
     const tagOverlap = myTags.filter((t) => authorTags.includes(t));
     return {
       id: p.id, title: p.title, category: p.category,
-      category_name: CATEGORY_MAP[p.category]?.name, category_emoji: CATEGORY_MAP[p.category]?.emoji,
+      category_name: CATEGORY_MAP[p.category]?.name, category_icon: CATEGORY_MAP[p.category]?.icon,
       city: p.city, meet_time: p.meet_time,
       images: safeJSON(p.images, []),
       ...coverFields(p),

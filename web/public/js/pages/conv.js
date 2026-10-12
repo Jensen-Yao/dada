@@ -75,7 +75,7 @@ App.register('conv', async (el, seg) => {
     try {
       const list = await API.get('/chat/convs');
       if (!list.length) {
-        box.innerHTML = UI.empty('💬', '暂无会话', '申请搭局通过后就能聊天啦');
+        box.innerHTML = UI.empty('message-circle', '暂无会话', '申请搭局通过后就能聊天');
         return;
       }
       box.innerHTML = list.map((cv) => `
@@ -86,7 +86,7 @@ App.register('conv', async (el, seg) => {
               ${UI.esc(cv.other?.nickname || '已注销用户')}
               ${cv.other?.verify_real ? '<span class="vbadge real">真人</span>' : ''}
             </div>
-            <div class="conv-last">${cv.last_message ? (cv.last_message.type === 'safety' ? '⚠️ 安全提示' : UI.esc(cv.last_message.content)) : '打个招呼吧～'}</div>
+            <div class="conv-last">${cv.last_message ? (cv.last_message.type === 'safety' ? '<span style="color:var(--danger);">安全提示</span>' : UI.esc(cv.last_message.content)) : '打个招呼吧'}</div>
           </div>
           ${cv.unread ? `<span class="dot-unread">${cv.unread}</span>` : ''}
           <span class="conv-time">${cv.last_message ? UI.timeAgo(cv.last_message.created_at) : ''}</span>
@@ -96,7 +96,7 @@ App.register('conv', async (el, seg) => {
       });
       highlightCurrent();
     } catch (err) {
-      box.innerHTML = UI.empty('😵', '加载失败', err.message);
+      box.innerHTML = UI.empty('alert-circle', '加载失败', err.message);
     }
   }
 
@@ -117,8 +117,8 @@ App.register('conv', async (el, seg) => {
     el.querySelector('#title').innerHTML = `
       ${UI.esc(other?.nickname || '…')}
       ${other?.verify_real ? '<span class="vbadge real">真人</span>' : ''}
-      ${other?.verify_student ? '<span class="vbadge real">🎓</span>' : ''}`;
-    msgsEl.innerHTML = data.messages.map(msgHTML).join('') || UI.empty('👋', '打个招呼', '聊聊具体安排，认识一下吧');
+      ${other?.verify_student ? '<span class="vbadge real">学生</span>' : ''}`;
+    msgsEl.innerHTML = data.messages.map(msgHTML).join('') || UI.empty('message-circle', '打个招呼', '聊聊具体安排，认识一下吧');
     scrollBottom();
     App.refreshBadges();
     // 桌面端切换不跳路由：仅同步地址栏，便于刷新后回到当前会话
@@ -159,9 +159,9 @@ App.register('conv', async (el, seg) => {
   // 举报/拉黑菜单
   el.querySelector('#btn-more').onclick = () => {
     const s = UI.sheet('', `
-      <button class="btn plain block" id="m-profile" style="margin-bottom:8px;">👤 查看 TA 的主页</button>
-      <button class="btn plain block" id="m-report" style="margin-bottom:8px;">🚩 举报聊天记录</button>
-      <button class="btn danger block" id="m-block">⛔ 拉黑并退出会话</button>`);
+      <button class="btn plain block" id="m-profile" style="margin-bottom:8px;">${UI.icon('user', 14)} 查看 TA 的主页</button>
+      <button class="btn plain block" id="m-report" style="margin-bottom:8px;">${UI.icon('flag', 14)} 举报聊天记录</button>
+      <button class="btn danger block" id="m-block">${UI.icon('slash', 14)} 拉黑并退出会话</button>`);
     s.el.querySelector('#m-profile').onclick = () => { s.close(); if (other) App.navigate('#/user/' + other.id); };
     s.el.querySelector('#m-report').onclick = () => { s.close(); openReport(); };
     s.el.querySelector('#m-block').onclick = async () => {
@@ -187,7 +187,7 @@ App.register('conv', async (el, seg) => {
         try {
           await API.post(`/users/${other.id}/report`, { reason: b.dataset.r, detail: '聊天会话内举报' });
           s.close();
-          UI.toast('已收到举报，我们会尽快核实 🛡️');
+          UI.toast('已收到举报，我们会尽快核实');
         } catch (err) { UI.toast(err.message); }
       };
     });

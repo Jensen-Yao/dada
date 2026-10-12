@@ -17,6 +17,7 @@
   --line: #EDEFF2;
   /* --danger 仅用于删除/封禁/SOS 等破坏性场景，与互动红语义区分 */
   --danger: #F04438;
+  --warning: #F7900C; /* EM-12 星评等警示/评分色 */
   --success: #12B76A;
   --safe: #ECFDF3;
   --warn-bg: #FFFAEB;
@@ -118,8 +119,8 @@ img { display: block; max-width: 100%; }
 .post-card:active { transform: scale(0.985); transition: transform .1s; }
 .post-emoji {
   width: 52px; height: 52px; border-radius: 16px; flex-shrink: 0;
-  display: flex; align-items: center; justify-content: center; font-size: 26px;
-  background: linear-gradient(135deg, #FFF4EC, #FFE8DA);
+  display: flex; align-items: center; justify-content: center;
+  background: var(--primary-soft); color: var(--primary-deep);
 }
 .post-cover {
   width: 52px; height: 52px; border-radius: 16px; flex-shrink: 0; object-fit: cover;
@@ -154,14 +155,19 @@ img { display: block; max-width: 100%; }
 .textarea { min-height: 90px; resize: none; }
 .select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='7'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23A5ABB2' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 14px center; }
 
-/* 分类选择网格 */
+/* 分类选择网格（EM-02：实拍图钉 40×40 圆角图 + 11px 文字，选中 2px 描边） */
 .cat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
 .cat-item {
-  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
   background: var(--card); border-radius: 14px; padding: 10px 4px;
-  border: 1.5px solid transparent; box-shadow: var(--shadow-card); font-size: 11px; color: var(--text-2);
+  border: 2px solid transparent; box-shadow: var(--shadow-card); font-size: 11px; color: var(--text-2);
 }
-.cat-item .ci { font-size: 24px; }
+.cat-thumb {
+  width: 40px; height: 40px; border-radius: 10px; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--primary-soft); color: var(--primary-deep); flex-shrink: 0;
+}
+.cat-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .cat-item.selected { border-color: var(--primary); background: var(--primary-soft); color: var(--primary-deep); font-weight: 600; }
 
 /* 分段选择 */
@@ -184,9 +190,14 @@ img { display: block; max-width: 100%; }
 .btn.block { width: 100%; }
 .btn.sm { padding: 8px 16px; font-size: 13.5px; border-radius: 12px; }
 
-/* ================= 空状态 / 加载 ================= */
+/* ================= 空状态 / 加载（EM-04：72px 圆底 + 44px 线性图标） ================= */
 .empty { text-align: center; padding: 60px 30px; color: var(--text-3); }
-.empty .e-icon { font-size: 52px; margin-bottom: 12px; }
+.empty .e-icon {
+  width: 72px; height: 72px; border-radius: 50%; margin: 0 auto 14px;
+  background: var(--primary-soft); color: var(--primary-deep);
+  display: flex; align-items: center; justify-content: center;
+}
+.empty.danger .e-icon { background: #FEECEC; color: var(--danger); }
 .empty .e-title { font-size: 15px; font-weight: 600; color: var(--text-2); margin-bottom: 4px; }
 .loading { text-align: center; padding: 30px; color: var(--text-3); font-size: 13px; }
 
@@ -241,9 +252,10 @@ img { display: block; max-width: 100%; }
 .conv-time { font-size: 11px; color: var(--text-3); flex-shrink: 0; }
 .dot-unread { min-width: 18px; height: 18px; border-radius: 9px; background: var(--danger); color: #fff; font-size: 11px; display: flex; align-items: center; justify-content: center; padding: 0 5px; font-weight: 600; }
 
-/* ================= 通知 ================= */
+/* ================= 通知（EM-05：36px 圆形容器 + 线性图标，sos/warning 红色语义） ================= */
 .notif-item { display: flex; gap: 12px; padding: 13px 14px; background: var(--card); border-bottom: 0.5px solid var(--line); align-items: flex-start; }
-.notif-icon { width: 38px; height: 38px; border-radius: 13px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 18px; background: var(--primary-soft); }
+.notif-icon { width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: var(--primary-soft); color: var(--primary-deep); }
+.notif-icon.danger { background: #FEECEC; color: var(--danger); }
 .notif-body { flex: 1; min-width: 0; }
 .notif-title { font-size: 14.5px; font-weight: 600; }
 .notif-text { font-size: 13px; color: var(--text-2); margin-top: 1px; }
@@ -267,7 +279,7 @@ img { display: block; max-width: 100%; }
 .me-stat span { font-size: 11.5px; color: var(--text-3); }
 .cell { display: flex; align-items: center; gap: 12px; padding: 14px; background: var(--card); border-bottom: 0.5px solid var(--line); }
 .cell:last-child { border-bottom: none; }
-.cell-icon { font-size: 19px; width: 26px; text-align: center; }
+.cell-icon { display: flex; align-items: center; justify-content: center; width: 26px; color: var(--text-2); }
 .cell-main { flex: 1; font-size: 15px; font-weight: 550; }
 .cell-arrow { color: var(--text-3); font-size: 14px; }
 
@@ -281,8 +293,12 @@ img { display: block; max-width: 100%; }
 .tag { display: inline-flex; align-items: center; font-size: 12px; padding: 3px 10px; border-radius: 10px; background: var(--bg); color: var(--text-2); margin: 2px 3px 2px 0; }
 .tag.on { background: var(--primary-soft); color: var(--primary-deep); font-weight: 600; }
 
-/* 星级 */
-.stars { color: var(--accent); font-size: 15px; letter-spacing: 2px; }
+/* 星级（EM-12：SVG 星组件） */
+.stars { color: var(--warning); font-size: 15px; letter-spacing: 2px; }
+.star-row { display: inline-flex; align-items: center; gap: 2px; }
+
+/* 性别文字 tag（EM-10：♀/♂ 文字化） */
+.gbadge { font-size: 12px; color: var(--text-3); font-weight: 500; }
 
 /* 搜索栏 */
 .search-bar { display: flex; align-items: center; gap: 8px; background: var(--bg); border-radius: var(--radius-md); padding: 9px 13px; }
@@ -317,9 +333,9 @@ img { display: block; max-width: 100%; }
 .login-hero h1 { font-size: 26px; font-weight: 800; margin-top: 8px; }
 .login-hero p { color: var(--text-2); font-size: 14px; margin-top: 6px; }
 
-/* 安全中心 */
+/* 安全中心（EM-06：18px 线性图标 + 加粗小标题 + 13px 正文，左对齐列表） */
 .tip-card { display: flex; gap: 12px; padding: 14px; background: var(--card); border-radius: 16px; box-shadow: var(--shadow-card); margin: 0 14px 10px; }
-.tip-icon { font-size: 26px; }
+.tip-icon { display: flex; flex-shrink: 0; color: var(--primary-deep); }
 .tip-title { font-weight: 700; font-size: 14.5px; }
 .tip-body { font-size: 13px; color: var(--text-2); margin-top: 2px; }
 
@@ -352,7 +368,7 @@ img { display: block; max-width: 100%; }
 .pin-emoji {
   width: 100%; height: 100%;
   display: flex; align-items: center; justify-content: center;
-  font-size: 38px; background: linear-gradient(135deg, #FFF4EC, #FFE8DA);
+  background: var(--primary-soft); color: var(--primary-deep);
 }
 /* 覆盖在封面上的半透明白底 pill：状态/性别/推荐理由 */
 .pin-flag {
@@ -420,11 +436,11 @@ img { display: block; max-width: 100%; }
   background: rgba(0, 0, 0, .45); color: #fff; font-size: var(--fs-xs);
   padding: 2px 8px; border-radius: 99px;
 }
-/* 无图详情的分类 emoji 头图块 */
+/* 无图详情的分类线性图标头图块（EM-02） */
 .detail-hero {
   width: 100%; aspect-ratio: var(--ar, 3 / 4);
   display: flex; align-items: center; justify-content: center;
-  font-size: 72px; background: linear-gradient(135deg, #FFF4EC, #FFE8DA);
+  background: var(--primary-soft); color: var(--primary-deep);
 }
 
 /* ---------- 详情底部固定操作栏（H5-11） ---------- */

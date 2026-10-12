@@ -15,7 +15,7 @@ export const postsRouter = Router();
 
 // ---------- 封面/比例字段（BE-02/03 + PC-03 三级兜底，确定性规则，禁随机/时间） ----------
 // aspect：按帖子 id 确定性分档（同帖永远同档）
-// cover 兜底链：images[0]（用户配图/seed 真图）→ 分类实拍照 /img/photos/{category}-{id%N+1}.jpg → 旧 SVG（终兜底，C5）
+// cover 兜底链：images[0]（用户配图/seed 真图）、分类实拍照 /img/photos/{category}-{id%N+1}.jpg、旧 SVG（终兜底，C5）
 export const ASPECTS = ['3:4', '1:1', '4:3'];
 // 每分类实拍照片数（与 docs/product-spec.md §F.1 清单一致，新增照片时同步此表）
 export const PHOTO_N = { food: 3, sports: 3, study: 2, travel: 3, live: 3, game: 3, movie: 2,
@@ -68,7 +68,7 @@ function postView(p, viewer) {
     author: publicUser(author),
     category: p.category,
     category_name: CATEGORY_MAP[p.category]?.name || p.category,
-    category_emoji: CATEGORY_MAP[p.category]?.emoji || '✨',
+    category_icon: CATEGORY_MAP[p.category]?.icon,
     title: p.title,
     content: p.content,
     city: p.city,
@@ -296,7 +296,7 @@ postsRouter.post('/:id/joins/:joinId/approve', requireAuth, (req, res) => {
   if (approve) {
     // 通过即建立站内会话，保证"去聊天"有入口
     getOrCreateConv(p.user_id, j.user_id, p.id);
-    notify(j.user_id, 'join_result', '申请已通过 🎉', `你已加入「${p.title}」，快去和组局者聊聊吧`, { post_id: p.id });
+    notify(j.user_id, 'join_result', '申请已通过', `你已加入「${p.title}」，快去和组局者聊聊吧`, { post_id: p.id });
     if (approved + 1 >= p.need_count) db.prepare("UPDATE posts SET status = 'full' WHERE id = ?").run(p.id);
   } else {
     notify(j.user_id, 'join_result', '申请未通过', `「${p.title}」的组局者未通过你的申请，别灰心，广场上还有更多搭局`, { post_id: p.id });

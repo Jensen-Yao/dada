@@ -80,7 +80,7 @@ App.register('edit-profile', async (el) => {
         bio: el.querySelector('#f-bio').value.trim(),
         tags: [...picked],
       });
-      UI.toast('已保存 ✨');
+      UI.toast('已保存');
       history.back();
     } catch (err) { UI.toast(err.message); }
   };
@@ -115,7 +115,7 @@ App.register('myposts', async (el) => {
     const box = el.querySelector('#list');
     const list = await API.get(`/my/posts/${type}`);
     if (!list.length) {
-      box.innerHTML = UI.empty('🗂️', '空空如也', type === 'published' ? '去发布你的第一个搭局吧' : '去广场看看感兴趣的搭局');
+      box.innerHTML = UI.empty('folder', '还没有内容', type === 'published' ? '去发布你的第一个搭局吧' : '去广场看看感兴趣的搭局');
       return;
     }
     const statusMap = { open: ['招募中', 'green'], full: ['已满员', 'gray'], done: ['已完成', 'blue'], closed: ['已关闭', 'gray'] };
@@ -124,7 +124,7 @@ App.register('myposts', async (el) => {
       const jm = p.my_join === 'pending' ? ['申请中', 'yellow'] : p.my_join === 'approved' ? ['已通过', 'green'] : p.my_join === 'rejected' ? ['未通过', 'gray'] : null;
       return `
       <div class="card post-card" data-id="${p.id}">
-        <div class="post-emoji">${p.category_emoji}</div>
+        <div class="post-emoji">${UI.catIcon(p.category, 26)}</div>
         <div class="post-main">
           <div style="display:flex; gap:6px; align-items:flex-start;">
             <div class="post-title" style="flex:1">${UI.esc(p.title)}</div>
@@ -133,8 +133,8 @@ App.register('myposts', async (el) => {
             </div>
           </div>
           <div class="post-meta">
-            <span class="pill gray">📍 ${UI.esc(p.city)}</span>
-            ${p.meet_time ? `<span class="pill gray">🕐 ${UI.esc(p.meet_time)}</span>` : ''}
+            <span class="pill gray">${UI.icon('location', 11)} ${UI.esc(p.city)}</span>
+            ${p.meet_time ? `<span class="pill gray">${UI.icon('clock', 11)} ${UI.esc(p.meet_time)}</span>` : ''}
             <span class="pill gray">${type === 'published' ? `已通过 ${p.approved_count}/${p.need_count}` : ''}</span>
           </div>
         </div>
@@ -160,10 +160,10 @@ App.register('ratings', async (el) => {
   <div id="list">${UI.loading()}</div>`;
   const list = await API.get('/users/me/ratings');
   const box = el.querySelector('#list');
-  if (!list.length) {
-    box.innerHTML = UI.empty('⭐', '还没有评价', '完成搭局后互相评价，积累你的搭子信用');
-    return;
-  }
+    if (!list.length) {
+      box.innerHTML = UI.empty('star', '还没有评价', '完成搭局后互相评价，积累你的搭子信用');
+      return;
+    }
   box.innerHTML = list.map((r) => `
     <div class="card" style="margin:0 14px 10px;">
       <div style="display:flex; align-items:center; gap:10px;">
@@ -172,7 +172,7 @@ App.register('ratings', async (el) => {
           <div style="font-weight:650; font-size:14px;">${UI.esc(r.rater.nickname)}</div>
           <div style="font-size:12px; color:var(--text-3);">${UI.timeAgo(r.created_at)} · ${UI.esc(r.post_title?.slice(0, 18) || '')}</div>
         </div>
-        <div class="stars">${'★'.repeat(r.stars)}${'☆'.repeat(5 - r.stars)}</div>
+        <div class="stars">${UI.starRow(r.stars, 15)}</div>
       </div>
       ${r.tags?.length ? `<div style="margin-top:8px;">${r.tags.map((t) => `<span class="pill">${UI.esc(t)}</span>`).join(' ')}</div>` : ''}
       ${r.comment ? `<div style="font-size:13.5px; color:var(--text-2); margin-top:6px; white-space:pre-wrap;">${UI.esc(r.comment)}</div>` : ''}
@@ -191,18 +191,19 @@ App.register('notifications', async (el) => {
   </div>
   <div id="list">${UI.loading()}</div>`;
 
-  const icons = { like: '❤️', comment: '💬', join_request: '🙋', join_result: '🎉', rating: '⭐', credit: '⚡', warning: '⚠️', sos: '🚨', report_result: '🛡️', post_done: '✅' };
+  // EM-05：10 类通知线性图标映射（G.4 表）
+  const icons = { like: 'heart', comment: 'comment', join_request: 'user-plus', join_result: 'check-circle', rating: 'star', credit: 'zap', warning: 'alert-triangle', sos: 'phone-call', report_result: 'shield', post_done: 'check' };
 
   async function load() {
     const list = await API.get('/notifications');
     const box = el.querySelector('#list');
     if (!list.length) {
-      box.innerHTML = UI.empty('🔔', '没有通知', '申请、点赞、评价都会出现在这里');
+      box.innerHTML = UI.empty('bell', '没有通知', '申请、点赞、评价都会出现在这里');
       return;
     }
     box.innerHTML = list.map((n) => `
       <div class="notif-item" style="${n.read ? 'opacity:0.6;' : ''}">
-        <div class="notif-icon">${icons[n.type] || '🔔'}</div>
+        <div class="notif-icon${n.type === 'sos' || n.type === 'warning' ? ' danger' : ''}">${UI.icon(icons[n.type] || 'bell', 16)}</div>
         <div class="notif-body">
           <div class="notif-title">${UI.esc(n.title)} ${n.read ? '' : '<span style="display:inline-block;width:7px;height:7px;background:var(--danger);border-radius:50%;margin-left:4px;"></span>'}</div>
           <div class="notif-text">${UI.esc(n.body)}</div>
@@ -230,28 +231,29 @@ App.register('safety', async (el) => {
   <div class="navbar">
     <div class="navbar-inner">
       <button class="navbar-btn" onclick="history.back()">‹</button>
-      <div class="navbar-title">🛡️ 安全中心</div>
+      <div class="navbar-title">安全中心</div>
       <div style="width:34px;"></div>
     </div>
   </div>
 
-  <div class="card" style="margin:14px; background:linear-gradient(135deg,#FEE4E2,#FFF4EC); border:none; display:flex; gap:12px; align-items:center;">
-    <span style="font-size:34px;">🚨</span>
+  <!-- EM-06：SOS 主按钮，--danger 实底，无装饰 -->
+  <div class="card sos-card" style="margin:14px;">
+    <span class="sos-ico">${UI.icon('phone-call', 30)}</span>
     <div style="flex:1;">
       <div style="font-weight:800;">紧急求助</div>
-      <div style="font-size:12.5px; color:var(--text-2);">感到不安全时一键上报，平台立即响应。<b>人身危险请直接打 110</b></div>
+      <div style="font-size:12.5px; color:var(--text-2); margin-top:2px;">人身安全受威胁时优先拨打 110</div>
     </div>
-    <button class="btn danger sm" id="btn-sos">SOS</button>
+    <button class="sos-btn" id="btn-sos">紧急求助</button>
   </div>
 
-  <div class="section-title">📖 安全须知</div>
+  <div class="section-title">安全须知</div>
   ${tips.emergency.map((t) => `
     <div class="tip-card">
-      <div class="tip-icon">${t.icon}</div>
+      <div class="tip-icon">${UI.icon(t.icon, 18)}</div>
       <div><div class="tip-title">${UI.esc(t.title)}</div><div class="tip-body">${UI.esc(t.body)}</div></div>
     </div>`).join('')}
 
-  <div class="section-title">📜 社区公约</div>
+  <div class="section-title">社区公约</div>
   <div class="card" style="margin:0 14px 20px; font-size:13.5px; color:var(--text-2); line-height:1.9;">
     ${tips.community_rules.map((r, i) => `${i + 1}. ${UI.esc(r)}<br>`).join('')}
   </div>`;
@@ -259,11 +261,11 @@ App.register('safety', async (el) => {
   el.querySelector('#btn-sos').onclick = async () => {
     const yes = await UI.confirm('确认发起<b>紧急求助</b>吗？<br><span style="font-size:12px;color:var(--text-3)">平台风控会立即收到你的求助信息</span>', { okText: '立即求助', danger: true });
     if (!yes) return;
-    const s = UI.sheet('🚨 紧急求助', `
+    const s = UI.sheet('紧急求助', `
       <input id="f-loc" class="input" placeholder="当前位置（如：五道口地铁站）">
       <textarea id="f-note" class="textarea" style="margin-top:10px;" placeholder="描述情况（选填）"></textarea>
       <button class="btn danger block" id="btn-go" style="margin-top:12px;">发送求助</button>
-      <div style="text-align:center; margin-top:10px; font-size:12.5px; color:var(--danger);">⚠️ 如遇人身危险，请立即拨打 110</div>`);
+      <div style="text-align:center; margin-top:10px; font-size:12.5px; color:var(--danger);">如遇人身危险，请立即拨打 110</div>`);
     s.el.querySelector('#btn-go').onclick = async () => {
       try {
         const r = await API.post('/safety/sos', {
@@ -289,9 +291,9 @@ App.register('settings', async (el) => {
     </div>
   </div>
   <div style="margin:14px; border-radius:16px; overflow:hidden; box-shadow:var(--shadow);">
-    <div class="cell"><span class="cell-icon">📱</span><span class="cell-main">账号</span><span style="color:var(--text-3); font-size:13px;">${UI.esc(me.id ? '用户 #' + me.id : '')}</span></div>
-    <div class="cell" id="c-safety2"><span class="cell-icon">🛡️</span><span class="cell-main">安全中心</span><span class="cell-arrow">›</span></div>
-    <div class="cell" id="c-blocks"><span class="cell-icon">⛔</span><span class="cell-main">黑名单</span><span class="cell-arrow">›</span></div>
+    <div class="cell"><span class="cell-icon">${UI.icon('smartphone', 18)}</span><span class="cell-main">账号</span><span style="color:var(--text-3); font-size:13px;">${UI.esc(me.id ? '用户 #' + me.id : '')}</span></div>
+    <div class="cell" id="c-safety2"><span class="cell-icon">${UI.icon('shield', 18)}</span><span class="cell-main">安全中心</span><span class="cell-arrow">›</span></div>
+    <div class="cell" id="c-blocks"><span class="cell-icon">${UI.icon('slash', 18)}</span><span class="cell-main">黑名单</span><span class="cell-arrow">›</span></div>
   </div>
   <div style="padding:0 14px;">
     <button class="btn danger block" id="btn-logout">退出登录</button>
@@ -322,6 +324,6 @@ App.register('settings', async (el) => {
     WS.disconnect();
     API.clearSession();
     location.hash = '#/login';
-    UI.toast('已退出，下次再来找搭子哦 👋');
+    UI.toast('已退出登录');
   };
 });

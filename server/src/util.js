@@ -75,21 +75,22 @@ export function safeJSON(s, fallback) {
 }
 
 // ---------- 搭子类型目录 ----------
+// EM-02：emoji 字段迁移为 icon（值为前端 ui.js CAT_ICONS 的线性图标名）
 export const CATEGORIES = [
-  { key: 'food', name: '美食干饭', emoji: '🍜' },
-  { key: 'sports', name: '运动健身', emoji: '🏃' },
-  { key: 'study', name: '学习自习', emoji: '📚' },
-  { key: 'travel', name: '旅行徒步', emoji: '🏔️' },
-  { key: 'live', name: '演出live', emoji: '🎤' },
-  { key: 'game', name: '游戏开黑', emoji: '🎮' },
-  { key: 'movie', name: '电影观影', emoji: '🎬' },
-  { key: 'photo', name: '摄影扫街', emoji: '📷' },
-  { key: 'pet', name: '遛狗宠物', emoji: '🐕' },
-  { key: 'coffee', name: '咖啡探店', emoji: '☕' },
-  { key: 'shopping', name: '逛街购物', emoji: '🛍️' },
-  { key: 'boardgame', name: '剧本桌游', emoji: '🎲' },
-  { key: 'commute', name: '通勤拼车', emoji: '🚗' },
-  { key: 'other', name: '其他搭子', emoji: '✨' },
+  { key: 'food', name: '美食干饭', icon: 'utensils' },
+  { key: 'sports', name: '运动健身', icon: 'activity' },
+  { key: 'study', name: '学习自习', icon: 'book-open' },
+  { key: 'travel', name: '旅行徒步', icon: 'mountain' },
+  { key: 'live', name: '演出live', icon: 'mic' },
+  { key: 'game', name: '游戏开黑', icon: 'gamepad' },
+  { key: 'movie', name: '电影观影', icon: 'film' },
+  { key: 'photo', name: '摄影扫街', icon: 'camera' },
+  { key: 'pet', name: '遛狗宠物', icon: 'paw' },
+  { key: 'coffee', name: '咖啡探店', icon: 'coffee' },
+  { key: 'shopping', name: '逛街购物', icon: 'shopping-bag' },
+  { key: 'boardgame', name: '剧本桌游', icon: 'dice' },
+  { key: 'commute', name: '通勤拼车', icon: 'car' },
+  { key: 'other', name: '其他搭子', icon: 'tag' },
 ];
 
 export const CATEGORY_MAP = Object.fromEntries(CATEGORIES.map((c) => [c.key, c]));

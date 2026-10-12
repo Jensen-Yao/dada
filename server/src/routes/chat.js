@@ -103,7 +103,7 @@ export function handleChatMessage(fromUser, convId, rawContent) {
   // 首条消息后插入安全提醒
   if (count === 0) {
     db.prepare('INSERT INTO messages (conv_id, sender_id, type, content, created_at) VALUES (?,?,?,?,?)')
-      .run(convId, fromUser.id, 'safety', '⚠️ 安全提示：请勿脱离平台交易或转账，谨防诈骗。首次见面建议选择人多的公共场所。', t);
+      .run(convId, fromUser.id, 'safety', '安全提示：请勿脱离平台交易或转账，谨防诈骗。首次见面建议选择人多的公共场所。', t);
   }
   return { message: msg, blocked_words: f.hits };
 }

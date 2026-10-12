@@ -20,7 +20,7 @@ App.register('user', async (el, seg) => {
       <div style="font-size:18px; font-weight:800; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
         ${UI.esc(u.nickname)} ${UI.genderBadge(u.gender)}
         ${u.verify_real ? '<span class="vbadge real">真人认证</span>' : ''}
-        ${u.verify_student ? '<span class="vbadge real">🎓 学生</span>' : ''}
+        ${u.verify_student ? '<span class="vbadge real">学生</span>' : ''}
       </div>
       <div style="font-size:13px; color:var(--text-3); margin-top:3px;">
         ${[u.age ? u.age + '岁' : '', u.school || u.occupation || '', u.city].filter(Boolean).join(' · ')}
@@ -28,7 +28,7 @@ App.register('user', async (el, seg) => {
       </div>
       <div style="display:flex; gap:6px; margin-top:6px; flex-wrap:wrap;">
         <span class="pill ${c.cls}">${c.text}</span>
-        ${u.rating_avg ? `<span class="pill gray">⭐ ${u.rating_avg}（${u.rating_count}条）</span>` : ''}
+        ${u.rating_avg ? `<span class="pill gray">${UI.icon('star', 11)} ${u.rating_avg}（${u.rating_count}条）</span>` : ''}
         ${(u.tags || []).map((t) => `<span class="pill gray">${UI.esc(t)}</span>`).join('')}
       </div>
     </div>
@@ -43,21 +43,21 @@ App.register('user', async (el, seg) => {
   </div>
 
   ${u.rating_tags?.length ? `
-  <div class="section-title">🏷️ 大家这样评价 TA</div>
+  <div class="section-title">大家这样评价 TA</div>
   <div class="card" style="margin:0 14px 12px;">
     ${tallyTags(u.rating_tags).map(([t, n]) => `<span class="pill" style="margin:2px 4px 2px 0;">${UI.esc(t)} ×${n}</span>`).join('')}
   </div>` : ''}
 
   ${u.recent_done?.length ? `
-  <div class="section-title">✅ 搭子履历</div>
+  <div class="section-title">搭子履历</div>
   <div class="wf" style="padding-top:0;">
     ${u.recent_done.map((p) => UI.pinCard(p, { history: true })).join('')}
   </div>` : ''}
 
   ${myId !== u.id ? `
   <div style="padding:6px 14px 20px; display:flex; gap:10px;">
-    <button class="btn danger sm" id="btn-block" style="flex:1;">⛔ 拉黑</button>
-    <button class="btn plain sm" id="btn-report" style="flex:1;">🚩 举报</button>
+    <button class="btn danger sm" id="btn-block" style="flex:1;">${UI.icon('slash', 13)} 拉黑</button>
+    <button class="btn plain sm" id="btn-report" style="flex:1;">${UI.icon('flag', 13)} 举报</button>
   </div>` : ''}`;
 
   el.querySelectorAll('.pin-card[data-id]').forEach((card) => {
@@ -85,7 +85,7 @@ App.register('user', async (el, seg) => {
         try {
           await API.post(`/users/${uid}/report`, { reason: b.dataset.r });
           s.close();
-          UI.toast('已收到举报，我们会尽快核实 🛡️');
+          UI.toast('已收到举报，我们会尽快核实');
         } catch (err) { UI.toast(err.message); }
       };
     });

@@ -69,7 +69,7 @@ const App = (() => {
       await routes[page]?.(el, seg.slice(1), new URLSearchParams((path || '').split('?')[1] || ''));
     } catch (err) {
       console.error(err);
-      el.innerHTML = UI.empty('😵', '页面出错了', err.message || '请稍后再试');
+      el.innerHTML = UI.empty('alert-circle', '页面出错了', err.message || '请稍后再试');
     }
     refreshBadges();
   }
@@ -132,13 +132,13 @@ const App = (() => {
       const b = document.createElement('div');
       b.id = 'pwa-banner';
       b.innerHTML = `
-        <div class="pwa-banner-logo">🤝</div>
+        <div class="pwa-banner-logo">${UI.icon('logo', 40)}</div>
         <div class="pwa-banner-main">
           <div class="pwa-banner-title">安装搭搭到桌面</div>
           <div class="pwa-banner-sub">下次一键直达，找搭子更快一步</div>
         </div>
         <button class="pwa-banner-btn" id="pwa-install">安装</button>
-        <button class="pwa-banner-close" id="pwa-close" aria-label="关闭">✕</button>`;
+        <button class="pwa-banner-close" id="pwa-close" aria-label="关闭">${UI.icon('x', 16)}</button>`;
       document.body.appendChild(b);
       requestAnimationFrame(() => b.classList.add('show'));
       // 底栏隐藏的页面（详情/会话等），横幅贴底展示

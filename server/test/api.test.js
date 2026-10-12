@@ -579,7 +579,7 @@ test('元数据：14分类/3费用/3性别要求/6评价标签', async () => {
   assert.equal(r.status, 200);
   const d = r.json.data;
   assert.equal(d.categories.length, 14);
-  assert.ok(d.categories.every((c) => c.key && c.name && c.emoji), 'each category has key/name/emoji');
+  assert.ok(d.categories.every((c) => c.key && c.name && c.icon), 'each category has key/name/icon');
   assert.equal(d.fee_modes.length, 3);
   assert.deepEqual(d.fee_modes.map((f) => f.key).sort(), ['aa', 'free', 'treat']);
   assert.equal(d.gender_reqs.length, 3);

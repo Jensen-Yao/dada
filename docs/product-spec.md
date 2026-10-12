@@ -755,3 +755,161 @@ export function coverFields(p) {
 3. **P2-3 照片库季节化扩容**：每分类补至 4 张（冬滑雪/夏露营等季节变体），按月份确定性切换变体，保持瀑布流新鲜感而不破坏确定性红线。
 4. **P2-4 双源容灾**：fetch-photos.mjs 增加 Pexels 备用 URL 列与失败自动切换，避免 Unsplash 单图下架造成素材缺口；CREDITS.md 记录双源。
 5. **P2-5 UGC 图片安全审核**：用户上传图接入与敏感词同级的审核队列（先机审后人工），防止实拍化后图片成为新的安全风险面。
+
+---
+
+## G. v2.5 去emoji化·成熟度打磨（EM-xx）
+
+> PM 负责。背景：用户反馈「emoji 用得太多，要对照小红书做成熟应用」。小红书的语言 = 线性图标 + 纯文本 + 真实照片，UI chrome 零 emoji。本章为唯一实现依据，工程师不得自由发挥。
+
+### G.0 审计基线（2026-10-12 全量扫描）
+
+扫描命令（验收同款）：
+
+```bash
+grep -rn -P '[\x{1F300}-\x{1FAFF}\x{2600}-\x{27BF}\x{2B00}-\x{2BFF}\x{FE0F}\x{2190}-\x{21FF}\x{2700}-\x{27BF}]' web/public server/src --include='*.js' --include='*.html' | grep -v node_modules
+```
+
+命中 **146 处 / 20 个文件**。分布 Top5：`misc.js` 19、`post.js` 18、`me.js` 16、`server/src/util.js` 14、`seed.js` 11；其余：conv.js 9、ui.js 8、user.js 7、publish.js 7、safety.js 7、chat.js 6、square.js 4、discover.js 4、admin.js 4、login.js 3、app.js 3、posts.js 3、legal.js 1、index.html 1、routes/chat.js 1。
+注意：`→`(U+2192)、`♀♂`(U+2640/42)、`★☆`(U+2605/06)、`✕`(U+2715)、`✅`(U+2705) 均落在扫描区间内，**一并视为 emoji 清除对象**。
+
+### G.1 替换原则（EM-00 总纲）
+
+1. **UI chrome 全换线性图标或纯文本**：图标位（cell/通知/空状态/tip/分类）→ `UI.icon` 线性 SVG；按钮、navbar 标题、section-title、chip、角标、pill → 纯文本（允许「图标+文字」组合，禁止裸 emoji）。
+2. **toast 与系统文案 → 纯文本**：删除一切装饰 emoji，小红书式克制短句（见 G.8）。
+3. **白名单（仅此两处可残留 emoji）**：`server/src/seed.js` 的 UGC 正文——L12 小鱼干 bio 的「🐟」个性签名、L144 meimei 聊天消息的「🍣」。约束：每条 UGC ≤1 个 emoji；**标题、bio 结构字段、location、时间等一律无 emoji**。
+4. seed 中的 `→`（如「国贸 → 望京」「老和山→北高峰」）**不属于白名单**：地点改「国贸 — 望京」、路线改「老和山—北高峰—美人峰—宝石山」（文案成熟度，非装饰）。
+5. 服务端历史 DB 中已存的「⚠️ 安全提示」消息**不迁移**，仅改新写入文案；演示环境重跑 seed 即清零。
+
+### G.2 EM-01 图标库扩充（ui.js ICON_PATHS）
+
+现有 19 个基础图标（compass/star/plus-square/message-circle/user/search/heart/bell/share/chevron-left/more-horizontal/send/comment/location/clock/people/eye/shield/edit）。**新增以下 20 个通用图标**（Feather 风格 24×24 stroke，`fill="none" stroke="currentColor" stroke-width="1.8"`，此表为唯一实现依据）：
+
+| name | 替换对象 | SVG path |
+|---|---|---|
+| `folder` | 🗂️ 我的搭局/空状态 | `<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>` |
+| `settings` | ⚙️ 设置 | `<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>` |
+| `smartphone` | 📱 账号 | `<rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/>` |
+| `slash` | ⛔ 拉黑/黑名单/无权 | `<circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>` |
+| `flag` | 🚩 举报 | `<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/>` |
+| `alert-circle` | 🚨/😵/sos | `<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>` |
+| `alert-triangle` | ⚠️ 警告 | `<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>` |
+| `check` | ✅ 按钮/完成态 | `<polyline points="20 6 9 17 4 12"/>` |
+| `check-circle` | ✅ 已通过/join_result | `<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>` |
+| `info` | 💡 发布 tip | `<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>` |
+| `camera` | 📷 添加图片/摄影分类 | `<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>` |
+| `x` | ✕ 关闭/删除图 | `<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>` |
+| `phone-call` | 🚨 报警/sos 通知 | `<path d="M15.05 5A5 5 0 0 1 19 8.95M15.05 1A9 9 0 0 1 23 8.94m-1 7.98v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.08 4.18 2 2 0 0 1 4.06 2h3a2 2 0 0 1 2 1.72c.127.96.362 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>` |
+| `user-check` | 🪪 真人认证 | `<path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><polyline points="17 11 19 13 23 9"/>` |
+| `graduation-cap` | 🎓 学生认证 | `<path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/>` |
+| `bar-chart-2` | 📊 运营后台 | `<line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>` |
+| `book-open` | 📖 安全须知/学习分类 | `<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>` |
+| `file-text` | 📋 申请管理/📜 公约 | `<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>` |
+| `zap` | ⚡ 搭力值通知 | `<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>` |
+| `user-plus` | 🙋 join_request | `<path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/>` |
+| `trending-up` | 🌱 热门空状态 | `<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>` |
+
+**新增 12 个分类图标**（book-open/camera 与通用表共用）：
+
+| 分类 key | name | path |
+|---|---|---|
+| food | 美食干饭 | `<path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3zm0 0v7"/>` |
+| sports | 运动健身 | `<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>` |
+| travel | 旅行徒步 | `<path d="m8 3 4 8 5-5 5 15H2L8 3z"/>` |
+| live | 演出live | `<path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>` |
+| game | 游戏开黑 | `<line x1="6" y1="11" x2="10" y2="11"/><line x1="8" y1="9" x2="8" y2="13"/><line x1="15" y1="12" x2="15.01" y2="12"/><line x1="18" y1="10" x2="18.01" y2="10"/><path d="M17.32 5H6.68a4 4 0 0 0-3.978 3.59c-.006.052-.01.101-.017.152C2.604 9.416 2 14.456 2 16a3 3 0 0 0 3 3c1 0 1.5-.5 2-1l1.414-1.414A2 2 0 0 1 9.828 16h4.344a2 2 0 0 1 1.414.586L17 18c.5.5 1 1 2 1a3 3 0 0 0 3-3c0-1.545-.604-6.584-.685-7.258-.007-.05-.011-.1-.017-.151A4 4 0 0 0 17.32 5z"/>` |
+| movie | 电影观影 | `<rect x="2" y="2" width="20" height="20" rx="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/>` |
+| pet | 遛狗宠物 | `<circle cx="11" cy="4" r="2"/><circle cx="18" cy="8" r="2"/><circle cx="20" cy="16" r="2"/><path d="M9 10a5 5 0 0 1 5 5v3.5a3.5 3.5 0 0 1-6.84 1.045Q6.52 17.48 4.46 16.84A3.5 3.5 0 0 1 5.5 10Z"/>` |
+| coffee | 咖啡探店 | `<path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/>` |
+| shopping | 逛街购物 | `<path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/>` |
+| boardgame | 剧本桌游 | `<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8" cy="8" r="1"/><circle cx="16" cy="8" r="1"/><circle cx="8" cy="16" r="1"/><circle cx="16" cy="16" r="1"/><circle cx="12" cy="12" r="1"/>` |
+| commute | 通勤拼车 | `<path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.9A3.7 3.7 0 0 0 2 12v4c0 .6.4 1 1 1h2"/><circle cx="7" cy="17" r="2"/><path d="M9 17h6"/><circle cx="17" cy="17" r="2"/>` |
+| other | 其他搭子 | `<path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.83z"/><line x1="7" y1="7" x2="7.01" y2="7"/>` |
+
+实现要点：① `ui.js` 内新增 `CAT_ICONS = { food:'utensils', sports:'activity', ... }`（key 同分类 key，导出为 `UI.catIcon`）；② `icon()` 支持第三参 `fill`（星评控件用：`star` 实心/描边切换，`fill="currentColor"`）；③ `UI.empty(icon, ...)` 第一参改为**图标名**，渲染为 44px 线性图标外包 72px `--primary-soft` 圆底，全站调用点同步改传图标名（见 G.4 登记表）。
+
+### G.3 EM-02 分类体系去emoji（定稿方案，工程师不用猜）
+
+1. **广场分类 chip（square.js L26/L43/L69/L72）→ 纯文本**：删除 `emoji: '🧭'`（"全部" chip）与 `${c.emoji} `，渲染 `${c.name}`。小红书话题 chip 就是纯文本胶囊，选中态用现有 primary 填充即可。
+2. **发布页分类网格（publish.js L35）→ 分类实拍图钉（推荐案，定稿）**：`.cat-item` 改为「上：圆角方图（40×40，radius 10）+ 下：11px 文字」。图片取每分类第 1 张实拍 `/img/photos/{key}-1.jpg`（资产已齐：14 分类 37 张，见 F.1）；`onerror` 兜底 = `UI.icon(CAT_ICONS[key], 20)` 置于 `--primary-soft` 圆底。CSS：`.cat-item .ci` 由 emoji 容器改 `.cat-thumb` 图容器，选中态加 `2px var(--primary)` 描边。
+3. **数据结构迁移（明确案）**：`server/src/util.js CATEGORIES` 的 `emoji` 字段**改名为 `icon`**，值为上表图标名（如 `{ key:'food', name:'美食干饭', icon:'utensils' }`）。
+   - `server/src/routes/posts.js` L71、`misc.js` L58/L97：`category_emoji` 输出**更名 `category_icon`**（返回图标名，不再返回 emoji；posts.js 的 `|| '✨'` 兜底删除）。
+   - FE 消费点同步：`ui.js` L217（pin 无图兜底 `pin-emoji` → `UI.icon(catIcon, 28)` 圆底）、`post.js` L42（detail-hero 无图兜底同上）、`misc.js` L127（`post-emoji` → 线性图标）、`me.js` L107（删除 emoji 前缀，仅留分类名文字）。
+   - **测试同步**：`server/test/api.test.js` L582 断言 `c.emoji` 改为 `c.icon`（用例数不变，仍 40 全绿）。
+4. 分类名后缀统一核查：「演出live」保留（品牌写法）。
+
+### G.4 EM-03 全站 UI chrome 去emoji · 逐文件登记表（审计 146 条 → 替换规格）
+
+**web/public/js/ui.js（8）**：L92/L93 `genderBadge` ♀/♂ → 文字「女」/「男」12px tag；L191 pin 角标「♀ 仅限女生」→ 纯文本「仅限女生」/「仅限男生」；L203 「已完成 ✅」→ `icon('check',12)+'已完成'`；L217 `pin-emoji` 兜底 → 分类线性图标（见 EM-02）。
+
+**web/public/js/app.js（3）**：L72 `empty('😵',...)` → `empty('alert-circle',...)`；L135 PWA banner 「🤝」→ `UI.icon('logo',40)`；L141 关闭「✕」→ `icon('x',16)`。
+
+**web/public/index.html（1）**：L12 favicon emoji data-URI → `<link rel="icon" href="/img/logo.svg">`（资产已有）。
+
+**web/public/js/pages/chat.js（6）**：L17/L34 通知铃「🔔」→ `icon('bell',20)`；L23/L47 空状态 💬 → `'message-circle'`；L59 列表副标「⚠️ 安全提示」→ 纯文本「安全提示」（`color:var(--danger)`）；L68 😵 → `'alert-circle'`。
+
+**web/public/js/pages/conv.js（9）**：L78 💬→`message-circle`；L89 ⚠️→纯文本「安全提示」；L99 😵→`alert-circle`；L120 「🎓」vbadge → 文字徽章「学生」；L121 👋→`message-circle`；L162 👤→`icon('user',14)`；L163 🚩→`icon('flag',14)`；L164 ⛔→`icon('slash',14)`；L190 toast → 纯文本「已收到举报，我们会尽快核实」。
+
+**web/public/js/pages/square.js（4）**：L26/L69 「全部」chip 去 🧭；L43/L72 chip 去 emoji 前缀（EM-02）；L99 🔍→`'search'`；L107 😵→`'alert-circle'`。
+
+**web/public/js/pages/discover.js（4）**：L19 「🎯 为你而设」→「为你而设」；L28 「🔥 本周热门搭局」→「本周热门搭局」；L31 🌱→`'trending-up'`；L33 页脚「🤝 轻社交…」→「轻社交 · 不婚恋 · 有边界」。section-title 一律纯文本左对齐粗体（小红书式，去图标前缀）。
+
+**web/public/js/pages/post.js（18）**：L42 hero emoji 兜底 → 分类图标（EM-02）；L58 「♀/♂ 仅限xx」→ 纯文本；L71 「📋 申请管理」→「申请管理」；L74 按钮 → `icon('check',14)`+「搭局已完成（开启互评）」；L78 「⭐ 搭后互评」→ 纯文本；L82 「💬 评论区（n）」→「评论区（n）」；L140 → `icon('check-circle',14)`+「已通过，去聊天」；L186 toast→「互评已开启」；L212 toast→「已提交申请，等待组局者通过」；L251 😵→`alert-circle`；L270 🎓→「学生」文字徽章；L274 「✅ 已通过」→「已通过」；L286 toast→「已通过，对方会收到通知」；L319/L335/L347 星评 `★★★★★/☆` → `icon('star',22)` 5 连，选中 `fill="currentColor"`（新增 SVG 星评，替换文本星星）。
+
+**web/public/js/pages/me.js（16）**：L34 「🎓 学生认证」chip →「学生认证」；L37 「📍 城市」→ `icon('location',12)`+城市名；L41 「★ 搭后评分」→ `icon('star',11)`+文字；L57 ⚠️ 提示条 → 纯文本 danger 条「搭力值不足 300，暂不能发布新搭局」；L70-74 五个 cell 图标 🗂️⭐🛡️📊⚙️ → `icon('folder'/'star'/'shield'/'bar-chart-2'/'settings',18)`；L106 删除 `|| '❤'` 兜底（ic() 必返 SVG）；L120 😵→`alert-circle`；L136 空状态 🗂️/🎒→`'folder'`；L160 真人认证 🪪→`icon('user-check',22)`；L165 学生认证 🎓→`icon('graduation-cap',22)`；L173 toast→「真人认证通过，搭力值 +50」；L189 toast→「学生认证通过，搭力值 +30」。
+
+**web/public/js/pages/misc.js（19）**：L83 toast→「已保存」；L118 🗂️→`'folder'`；L136 📍→`icon('location',11)`；L137 🕐→`icon('clock',11)`；L164 ⭐→`'star'`；L175 星评文本 → SVG 星（同 post.js）；L194 通知图标 map → `{ like:'heart', comment:'comment', join_request:'user-plus', join_result:'check-circle', rating:'star', credit:'zap', warning:'alert-triangle', sos:'phone-call', report_result:'shield', post_done:'check' }`；L200 🔔→`'bell'`；L205 `.notif-icon` 渲染 `UI.icon(icons[n.type],16)`（danger 类型 sos/warning 加红点底）；L233 「🛡️ 安全中心」→「安全中心」；L239 SOS 大图标 🚨→`icon('phone-call',30)`+「紧急求助」按钮；L247/L254 📖/📜→纯文本标题；L262 sheet「🚨 紧急求助」→「紧急求助」；L266 ⚠️→纯文本 danger「如遇人身危险，请立即拨打 110」；L292/293/294 设置 cell 📱🛡️⛔→`icon('smartphone'/'shield'/'slash',18)`；L325 toast→「已退出登录」。
+
+**web/public/js/pages/publish.js（7）**：L23 💡→`icon('info',16)`（`.pub-tip-emoji` 类改 `.pub-tip-ico`）；L86 「♀ 女生专属局…」→ 去符号纯文本；L93/L158 「📷 添加图片」→ `icon('camera',20)`+文字；L103 「🚀 发布搭局」→ 纯文本「发布搭局」；L156 删除图「✕」→ `icon('x',12)`；L192 toast→「发布成功，等搭子来找你」。
+
+**web/public/js/pages/login.js（3）**：L9 logo onerror 兜底 🤝 → 文字「搭搭」；L37 「→」→ 文字链接「去注册」/「去登录」；L40 「先随便逛逛 👀」→「先随便逛逛」。
+
+**web/public/js/pages/admin.js（4）**：L7 →「运营后台」；L46 ✅→`'check-circle'`；L63 「⚠️ 警告」→ `icon('alert-triangle',13)`+「警告」；L110 ⛔→`'slash'`。
+
+**web/public/js/pages/user.js（7）**：L23 🎓→「学生」文字徽章；L31 ⭐ pill → `icon('star',11)`+「4.8（12条）」；L46/L52 🏷️/✅→纯文本标题；L59 ⛔→`icon('slash',13)`+「拉黑」；L60 🚩→`icon('flag',13)`+「举报」；L88 toast→纯文本。
+
+**web/public/js/pages/legal.js（1）**：L88 「我的 → 编辑资料」→「我的 · 编辑资料」。
+
+**server/src/util.js（14）**：L79-92 CATEGORIES `emoji` → `icon` 字段（EM-02 迁移表）。
+
+**server/src/routes/posts.js（3）**：L18 注释无 emoji 不动；L71 `category_emoji`→`category_icon`（删 ✨ 兜底）；L299 notify 标题「申请已通过 🎉」→「申请已通过」。
+
+**server/src/routes/misc.js（2 处 emoji 字段引用）**：L58/L97 `category_emoji`→`category_icon`。
+
+**server/src/routes/safety.js（7）**：L11-16 tips 图标 🚨📍🏢💰🍷🤝 → 图标名 `phone-call`/`share`/`location`/`slash`/`eye`/`shield`（FE misc.js 渲染改 `UI.icon(t.icon,18)`）；L39 notify「🚨 紧急求助」→「紧急求助」。
+
+**server/src/routes/chat.js（1）+ seed.js L158**：安全提示消息「⚠️ 安全提示：…」→「安全提示：请勿脱离平台交易或转账，谨防诈骗。首次见面建议选择人多的公共场所。」（仅新写入；旧库不迁移）。
+
+**server/src/seed.js（11）**：L5/L162/L166 console.log emoji 清理；L46/L58/L62/L93 location/content 的 `→` →「—」；**L12 🐟、L144 🍣 白名单保留**（UGC 正文，各 1 个）；标题字段复核均无 emoji，通过。
+
+### G.5 EM-04 空状态视觉规格（全站统一）
+
+`UI.empty(iconName, title, sub)`：72px `--primary-soft` 圆底 + 44px 线性图标（`--primary-deep`）+ 主文案 15px/600 + 副文案 13px `--text-3`。文案口吻：主文案=状态陈述（≤10 字，如「还没有会话」「这里还没有搭局」），副文案=行动指引（如「申请搭局通过后就能聊天啦」）。错误态用 `alert-circle` + `--danger` 描边变体。禁止任何 emoji 与「空空如也」类卖萌用语（misc.js L118 主文案改「还没有内容」）。
+
+### G.6 EM-05 通知中心规格
+
+图标容器 36px 圆形 `--primary-soft`，内嵌 16px 线性图标；类型色映射：sos/warning 底 `#FEECEC` 图标 `--danger`，like/rating/join_result 底 `--primary-soft`，其余灰底 `--bg-2`。通知标题（服务端 notify 的 title 参数）一律纯文本：posts.js L299「申请已通过 🎉」→「申请已通过」，其余复核无 emoji。
+
+### G.7 EM-06 安全中心规格
+
+navbar 标题纯文本；顶部 SOS 主按钮：大号 `phone-call` 图标 + 「紧急求助」+ 副文案「人身安全受威胁时优先拨打 110」，按钮用 `--danger` 实底（小红书式功能钮无装饰）。安全须知 6 条 tip：18px 线性图标（G.4 safety.js 映射）+ 加粗小标题 + 13px 正文，左对齐列表，无图标底色渐变。
+
+### G.8 EM-07 toast / 系统文案口吻
+
+规则：≤14 字陈述句、零 emoji、零感叹号堆叠、不用「～」结尾。对照表（旧 → 新）：「已开启互评 🎉」→「互评已开启」；「已提交申请，等待组局者通过 🙌」→「已提交申请，等待组局者通过」；「已通过 ✅ 对方会收到通知」→「已通过，对方会收到通知」；「评价成功，感谢反馈 💛」→「评价成功，感谢反馈」；「发布成功，等搭子来找你 🎉」→ 保留文案去 emoji；「已保存 ✨」→「已保存」；「已退出，下次再来找搭子哦 👋」→「已退出登录」；「真人认证通过，+50 搭力值 🎉」→「真人认证通过，搭力值 +50」等，全量见 G.4 登记表。
+
+### G.9 EM-08~11 PM 成熟度观察（对照小红书的其余打磨项）
+
+- **EM-08 品牌资产去 emoji**：favicon（index.html L12）与 PWA banner logo 用 `img/logo.svg` / `UI.icon('logo')`，全站唯一品牌符号（握手抽象形），登录页 fallback 文字「搭搭」。
+- **EM-09 页面标题一致性**：所有 navbar-title 纯文本、无图标前缀（📊 运营后台/🛡️ 安全中心已列）；标题字号统一走 `--fs-title`，不允许 inline `font-size:20px` 特例（square.js L24 改用 token）。
+- **EM-10 性别符号文字化**：♀/♂ 全站替换为「仅限女生/仅限男生」「女/男」（pill/tag 样式），与小红书纯文字 tag 一致；`genderBadge` 输出同步。
+- **EM-11 语气词统一**：正文/空状态不再混用「～」「！」；聊天消息文案保留口语但 seed 安全提示、toast、按钮全部陈述句；「先随便逛逛 👀」等处删符号留短句。
+- **EM-12 星评控件 SVG 化**：3 处文本星星（post.js 2、misc.js 1）统一为可交互/只读两态 SVG 星组件，半星不支持（5 星整），色彩 `--warning`。
+
+### G.10 验收标准（PM grep + 截图双验，不通过打回）
+
+1. **grep 归零**：G.0 同款命令在 `web/public` 与 `server/src` 的**非白名单文件**命中数为 0；`seed.js` 仅允许 L12（🐟）与 L144（🍣）两行命中。
+2. **截图走查**：广场/发现/详情/发布/消息/会话/聊天/通知/我的/安全中心/设置/管理后台/登录 13 页，桌面 + 移动双端截图，人工确认无 emoji 观感；星评、分类网格、空状态、通知图标逐页核对线性图标渲染。
+3. **40 测试全绿**：`api.test.js` 用例数不变（L582 断言改 `c.icon`），`npm test` 通过。
+4. **白名单清单（允许残留，仅此 2 处）**：`server/src/seed.js` L12 bio「🐟」、L144 聊天消息「🍣」——均为 UGC 正文、每条 1 个、非标题非结构字段。其余任何文件不得命中。
+5. 回归红线不破坏：封面三级兜底、头像 onerror 链、TabBar 角标刷新、瀑布流确定性公式（`id%N`）均保持原行为。

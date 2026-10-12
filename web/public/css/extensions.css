@@ -297,8 +297,21 @@
   background: var(--card);
   box-shadow: var(--shadow-soft);
 }
-.pub-tip .pub-tip-emoji { font-size: 22px; flex-shrink: 0; }
+.pub-tip .pub-tip-ico { display: flex; flex-shrink: 0; color: var(--primary-deep); }
 .pub-tip .pub-tip-text { font-size: var(--fs-sm); color: var(--text-2); line-height: 1.55; }
+
+/* 安全中心 SOS（EM-06：--danger 实底功能钮，小红书式无装饰） */
+.sos-card { display: flex; gap: 12px; align-items: center; }
+.sos-ico {
+  width: 52px; height: 52px; border-radius: 50%; flex-shrink: 0;
+  background: #FEECEC; color: var(--danger);
+  display: flex; align-items: center; justify-content: center;
+}
+.sos-btn {
+  background: var(--danger); color: #fff; font-weight: 700; font-size: 13.5px;
+  padding: 9px 16px; border-radius: 99px; flex-shrink: 0;
+}
+.sos-btn:active { transform: scale(0.96); }
 .pub-counter {
   display: flex;
   align-items: center;
@@ -418,13 +431,11 @@
   width: 44px;
   height: 44px;
   border-radius: 12px;
-  background: var(--grad-primary);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
-  font-size: 22px;
   flex-shrink: 0;
+  overflow: hidden;
 }
 .pwa-banner-main { flex: 1; min-width: 0; }
 .pwa-banner-title { font-size: 14px; font-weight: 700; }

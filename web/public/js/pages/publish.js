@@ -20,7 +20,7 @@ App.register('publish', async (el) => {
 
   <div style="padding:14px 14px 6px;">
     <div class="card pub-tip">
-      <span class="pub-tip-emoji">💡</span>
+      <span class="pub-tip-ico">${UI.icon('info', 16)}</span>
       <div class="pub-tip-text">
         写清楚<b>时间、地点、人数和要求</b>，能大幅提高成搭率。禁止引流站外与任何违规内容。
       </div>
@@ -32,7 +32,9 @@ App.register('publish', async (el) => {
       <label>搭什么 <span class="req">*</span></label>
       <div class="cat-grid" id="cat-grid">
         ${meta.categories.map((c) => `
-          <button class="cat-item" data-cat="${c.key}"><span class="ci">${c.emoji}</span>${c.name}</button>`).join('')}
+          <button class="cat-item" data-cat="${c.key}">
+            <span class="cat-thumb"><img src="/img/photos/${c.key}-1.jpg" alt="" loading="lazy"></span>${c.name}
+          </button>`).join('')}
       </div>
     </div>
 
@@ -83,14 +85,14 @@ App.register('publish', async (el) => {
         ${meta.gender_reqs.map((g) => `<button data-g="${g.key}">${g.name}</button>`).join('')}
       </div>
       <div id="female-tip" class="pub-female-tip hidden">
-        ♀ 女生专属局已开启：仅女生可以申请，聊天与见面更安心
+        女生专属局已开启：仅女生可以申请，聊天与见面更安心
       </div>
     </div>
 
     <div class="form-item">
       <label>配图（最多3张，让搭子更想加入）</label>
       <div class="img-pick-row" id="img-picks">
-        <div class="img-pick-add" id="img-add">📷<span>添加图片</span></div>
+        <div class="img-pick-add" id="img-add">${UI.icon('camera', 20)}<span>添加图片</span></div>
       </div>
       <input type="file" id="f-images" accept="image/*" multiple class="hidden">
     </div>
@@ -100,7 +102,7 @@ App.register('publish', async (el) => {
       <input id="f-req" class="input" maxlength="100" placeholder="如：能吃辣、不迟到、有基础">
     </div>
 
-    <button class="btn primary block pub-cta" id="btn-publish">🚀 发布搭局</button>
+    <button class="btn primary block pub-cta" id="btn-publish">发布搭局</button>
     <div class="pub-foot-note">
       发布需搭力值 ≥ 300 · 你当前 ${me?.credit ?? '—'} 分
     </div>
@@ -153,14 +155,24 @@ App.register('publish', async (el) => {
     row.innerHTML = pickedFiles.map((f, i) => `
       <div style="position:relative;">
         <img class="img-pick" src="${URL.createObjectURL(f)}" alt="">
-        <button class="img-pick-del" data-del="${i}">✕</button>
+        <button class="img-pick-del" data-del="${i}">${UI.icon('x', 12)}</button>
       </div>`).join('') +
-      (pickedFiles.length < 3 ? `<div class="img-pick-add" id="img-add">📷<span>添加图片</span></div>` : '');
+      (pickedFiles.length < 3 ? `<div class="img-pick-add" id="img-add">${UI.icon('camera', 20)}<span>添加图片</span></div>` : '');
     row.querySelector('#img-add')?.addEventListener('click', () => imgInput.click());
     row.querySelectorAll('[data-del]').forEach((b) => {
       b.onclick = () => { pickedFiles.splice(parseInt(b.dataset.del), 1); renderPicks(); };
     });
   }
+  // EM-02：分类图钉 onerror 降级（实拍图 404 时换 --primary-soft 圆底线性图标）
+  el.querySelectorAll('.cat-thumb img').forEach((img) => {
+    img.onerror = () => {
+      const key = img.closest('.cat-item')?.dataset.cat;
+      const sp = document.createElement('span');
+      sp.className = 'cat-thumb fb';
+      sp.innerHTML = UI.catIcon(key, 20);
+      img.replaceWith(sp);
+    };
+  });
   async function uploadImages(pid) {
     if (!pickedFiles.length) return;
     const fd = new FormData();
@@ -189,7 +201,7 @@ App.register('publish', async (el) => {
         need_count: state.need_count, fee_mode: state.fee_mode,
         gender_req: state.gender_req, requirements: $('f-req').value.trim(),
       });
-      UI.toast('发布成功，等搭子来找你 🎉');
+      UI.toast('发布成功，等搭子来找你');
       try { await uploadImages(p.id); } catch { /* 配图上传失败不阻塞 */ }
       App.navigate('#/post/' + p.id);
     } catch (err) {

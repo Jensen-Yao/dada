@@ -31,14 +31,14 @@ App.register('me', async (el) => {
         <div class="me2-nick">
           ${esc(me.nickname)} ${UI.genderBadge(me.gender)}
           ${me.verify_real ? '<span class="me2-chip blue">已真人认证</span>' : ''}
-          ${me.verify_student ? '<span class="me2-chip">🎓 学生认证</span>' : ''}
+          ${me.verify_student ? '<span class="me2-chip">学生认证</span>' : ''}
         </div>
         <div class="me2-uid">搭搭号：${esc(me.username || '—')} <span class="copy">复制</span></div>
-        <div class="me2-bio">${esc(me.bio || (me.city ? '📍 ' + me.city : '还没写简介，点右上角编辑资料'))}</div>
+        <div class="me2-bio">${me.bio ? esc(me.bio) : (me.city ? `${ic('location', 12)} ${esc(me.city)}` : '还没写简介，点右上角编辑资料')}</div>
         <div class="me2-chips">
           ${me.mbti ? `<span class="me2-chip">${esc(me.mbti)}</span>` : ''}
           ${(me.tags || []).slice(0, 4).map((t) => `<span class="me2-chip">${esc(t)}</span>`).join('')}
-          ${me.rating_avg != null ? `<span class="me2-chip">★ 搭后评分 ${me.rating_avg}</span>` : ''}
+          ${me.rating_avg != null ? `<span class="me2-chip">${ic('star', 11)} 搭后评分 ${me.rating_avg}</span>` : ''}
         </div>
       </div>
     </div>
@@ -54,7 +54,7 @@ App.register('me', async (el) => {
     <div style="flex:1;">
       <div style="font-weight:800; font-size:15px;">搭力值 <span class="pill ${c.cls}">${c.text}</span></div>
       <div style="font-size:12px; color:var(--text-3); margin-top:2px; line-height:1.5;">
-        ${me.credit < 300 ? '⚠️ 搭力值不足300，暂不能发布新搭局' : '认证、完成搭局、获得好评都能涨分'}
+        ${me.credit < 300 ? '<span style="color:var(--danger);">搭力值不足 300，暂不能发布新搭局</span>' : '认证、完成搭局、获得好评都能涨分'}
       </div>
     </div>
     <button class="btn ghost sm" id="btn-verify">去认证</button>
@@ -67,11 +67,11 @@ App.register('me', async (el) => {
   <div class="me2-grid" id="me-grid">${UI.loading()}</div>
 
   <div class="me2-entries">
-    <div class="cell" id="c-myposts"><span class="cell-icon">🗂️</span><span class="cell-main">我的搭局</span><span class="cell-arrow">›</span></div>
-    <div class="cell" id="c-ratings"><span class="cell-icon">⭐</span><span class="cell-main">收到的评价</span><span class="cell-arrow">›</span></div>
-    <div class="cell" id="c-safety"><span class="cell-icon">🛡️</span><span class="cell-main">安全中心</span><span class="cell-arrow">›</span></div>
-    ${me.is_admin ? '<div class="cell" id="c-admin"><span class="cell-icon">📊</span><span class="cell-main">运营后台</span><span class="pill blue">管理员</span><span class="cell-arrow">›</span></div>' : ''}
-    <div class="cell" id="c-settings"><span class="cell-icon">⚙️</span><span class="cell-main">设置</span><span class="cell-arrow">›</span></div>
+    <div class="cell" id="c-myposts"><span class="cell-icon">${ic('folder', 18)}</span><span class="cell-main">我的搭局</span><span class="cell-arrow">›</span></div>
+    <div class="cell" id="c-ratings"><span class="cell-icon">${ic('star', 18)}</span><span class="cell-main">收到的评价</span><span class="cell-arrow">›</span></div>
+    <div class="cell" id="c-safety"><span class="cell-icon">${ic('shield', 18)}</span><span class="cell-main">安全中心</span><span class="cell-arrow">›</span></div>
+    ${me.is_admin ? `<div class="cell" id="c-admin"><span class="cell-icon">${ic('bar-chart-2', 18)}</span><span class="cell-main">运营后台</span><span class="pill blue">管理员</span><span class="cell-arrow">›</span></div>` : ''}
+    <div class="cell" id="c-settings"><span class="cell-icon">${ic('settings', 18)}</span><span class="cell-main">设置</span><span class="cell-arrow">›</span></div>
   </div>
 
   <div style="text-align:center; color:var(--text-3); font-size:11.5px; padding-bottom:8px;">搭搭 v2.0 · 轻社交 · 不婚恋 · 有边界</div>`;
@@ -103,8 +103,8 @@ App.register('me', async (el) => {
       <div class="me2-cell-title">${esc(p.title)}</div>
       ${metaBits ? `<div class="me2-cell-meta">${metaBits}</div>` : ''}
       <div class="me2-cell-foot${p.liked ? ' liked' : ''}">
-        <span class="like-ico">${ic('heart', 14) || '❤'}</span><b>${likes}</b>
-        <span style="margin-left:auto;">${p.category_emoji || ''} ${esc(p.category_name || '')}</span>
+        <span class="like-ico">${ic('heart', 14)}</span><b>${likes}</b>
+        <span style="margin-left:auto;">${esc(p.category_name || '')}</span>
       </div>
     </div>`;
   }
@@ -117,7 +117,7 @@ App.register('me', async (el) => {
     try {
       cache[tab] = await API.get(`/my/posts/${tab}`);
     } catch (err) {
-      listBox.innerHTML = UI.empty('😵', '加载失败', err.message);
+      listBox.innerHTML = UI.empty('alert-circle', '加载失败', err.message);
       return;
     }
     render(tab);
@@ -133,7 +133,7 @@ App.register('me', async (el) => {
     const list = cache[tab] || [];
     if (!list.length) {
       listBox.innerHTML = UI.empty(
-        tab === 'published' ? '🗂️' : '🎒',
+        'folder',
         tab === 'published' ? '还没有发布的搭局' : '还没有参加的搭局',
         tab === 'published' ? '点下方「发布」开一个局，等搭子来找你' : '去广场看看感兴趣的搭局，申请加入吧'
       );
@@ -157,12 +157,12 @@ App.register('me', async (el) => {
         认证能大幅提高成搭率：搭友更敢报名你的局，你也更容易通过别人的申请。
       </div>
       <button class="btn plain block" id="v-real" style="margin-bottom:10px; justify-content:flex-start; gap:10px;">
-        <span style="font-size:22px;">🪪</span>
+        <span style="display:flex;">${ic('user-check', 22)}</span>
         <span style="text-align:left;"><b>真人认证</b> <span class="pill green">+50 搭力值</span><br><span style="font-size:12px;color:var(--text-3)">演示环境一键通过（正式版走人脸核验）</span></span>
         ${me.verify_real ? '<span class="pill green">已通过</span>' : ''}
       </button>
       <button class="btn plain block" id="v-stu" style="justify-content:flex-start; gap:10px;">
-        <span style="font-size:22px;">🎓</span>
+        <span style="display:flex;">${ic('graduation-cap', 22)}</span>
         <span style="text-align:left;"><b>学生认证</b> <span class="pill green">+30 搭力值</span><br><span style="font-size:12px;color:var(--text-3)">填写学校名称（正式版验证学籍）</span></span>
         ${me.verify_student ? '<span class="pill green">已通过</span>' : ''}
       </button>`);
@@ -170,7 +170,7 @@ App.register('me', async (el) => {
       if (me.verify_real) return UI.toast('已通过真人认证');
       try {
         await API.post('/users/me/verify', { type: 'real' });
-        s.close(); UI.toast('真人认证通过，+50 搭力值 🎉');
+        s.close(); UI.toast('真人认证通过，搭力值 +50');
         location.hash = '#/square';
         setTimeout(() => { location.hash = '#/me'; }, 60);
       } catch (err) { UI.toast(err.message); }
@@ -186,7 +186,7 @@ App.register('me', async (el) => {
         try {
           await API.post('/users/me/verify', { type: 'student', school });
           s2.close(); s.close();
-          UI.toast('学生认证通过，+30 搭力值 🎓');
+          UI.toast('学生认证通过，搭力值 +30');
           setTimeout(() => { location.hash = '#/square'; setTimeout(() => { location.hash = '#/me'; }, 60); }, 60);
         } catch (err) { UI.toast(err.message); }
       };

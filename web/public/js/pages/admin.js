@@ -4,7 +4,7 @@ App.register('admin', async (el) => {
   <div class="navbar">
     <div class="navbar-inner">
       <button class="navbar-btn" onclick="history.back()">‹</button>
-      <div class="navbar-title">📊 运营后台</div>
+      <div class="navbar-title">运营后台</div>
       <div style="width:34px;"></div>
     </div>
   </div>
@@ -43,7 +43,7 @@ App.register('admin', async (el) => {
       } else if (tab === 'reports') {
         const list = await API.get('/admin/reports?status=pending');
         if (!list.length) {
-          panel.innerHTML = UI.empty('✅', '举报队列已清空', '社区很和谐，继续保持');
+          panel.innerHTML = UI.empty('check-circle', '举报队列已清空', '社区很和谐，继续保持');
           return;
         }
         panel.innerHTML = list.map((r) => `
@@ -60,7 +60,7 @@ App.register('admin', async (el) => {
             ${r.detail ? `<div style="font-size:13px; color:var(--text-2); margin-top:4px; background:var(--bg); border-radius:10px; padding:8px 10px;">${UI.esc(r.detail)}</div>` : ''}
             <div style="display:flex; gap:8px; margin-top:10px;">
               <button class="btn plain sm" data-id="${r.id}" data-act="dismiss" style="flex:1;">驳回</button>
-              <button class="btn plain sm" data-id="${r.id}" data-act="warn" style="flex:1;">⚠️ 警告</button>
+              <button class="btn plain sm" data-id="${r.id}" data-act="warn" style="flex:1;">${UI.icon('alert-triangle', 13)} 警告</button>
               <button class="btn danger sm" data-id="${r.id}" data-act="ban" style="flex:1;">封禁/下架</button>
             </div>
           </div>`).join('');
@@ -107,7 +107,7 @@ App.register('admin', async (el) => {
         });
       }
     } catch (err) {
-      panel.innerHTML = UI.empty('⛔', '无权访问', err.message);
+      panel.innerHTML = UI.empty('slash', '无权访问', err.message);
     }
   }
 

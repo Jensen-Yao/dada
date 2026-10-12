@@ -31,7 +31,7 @@ App.register('post', async (el, seg) => {
     const imgs = p.images || [];
     const ar = (UI.aspectOf(p) || '3:4').replace(':', ' / ');
 
-    // H5-10：大图轮播（scroll-snap + n/m 页码指示）；无图降级为分类 emoji 头图块
+    // H5-10：大图轮播（scroll-snap + n/m 页码指示）；无图降级为分类线性图标头图块（EM-02）
     const mediaHTML = imgs.length ? `
     <div style="position:relative;">
       <div class="carousel" id="carousel" style="--ar:${ar}">
@@ -39,7 +39,7 @@ App.register('post', async (el, seg) => {
       </div>
       <span class="carousel-ind" id="car-ind">1/${imgs.length}</span>
     </div>` : `
-    <div class="detail-hero" style="--ar:${ar}">${p.category_emoji}</div>`;
+    <div class="detail-hero" style="--ar:${ar}">${UI.catIcon(p.category, 64)}</div>`;
 
     el.innerHTML = `
     <div class="navbar">
@@ -55,7 +55,7 @@ App.register('post', async (el, seg) => {
     <!-- 内容卡：标题 + pill 标签 + 正文 + 信息行（标题下移至轮播下方，XHS 式） -->
     <div class="card" style="margin:12px 14px;">
       <div style="font-size:var(--fs-title); font-weight:800; line-height:1.45;">${UI.esc(p.title)}</div>
-      <div style="margin-top:8px; display:flex; gap:6px; flex-wrap:wrap;">${statusPill(p)}<span class="pill">${UI.esc(p.fee_mode_name)}</span>${p.gender_req !== 'any' ? `<span class="pill blue">${p.gender_req === 'female' ? '♀ 仅限女生' : '♂ 仅限男生'}</span>` : ''}</div>
+      <div style="margin-top:8px; display:flex; gap:6px; flex-wrap:wrap;">${statusPill(p)}<span class="pill">${UI.esc(p.fee_mode_name)}</span>${p.gender_req !== 'any' ? `<span class="pill blue">${p.gender_req === 'female' ? '仅限女生' : '仅限男生'}</span>` : ''}</div>
       ${p.content ? `<div style="margin-top:12px; font-size:var(--fs-md); line-height:1.7; color:var(--text); white-space:pre-wrap;">${UI.esc(p.content)}</div>` : ''}
       <div style="margin-top:14px; padding-top:12px; border-top:0.5px solid var(--line);">
         ${metaRow(UI.icon('location', 15), `${UI.esc(p.city)}${p.location_name ? ' · ' + UI.esc(p.location_name) : ''}`)}
@@ -68,18 +68,18 @@ App.register('post', async (el, seg) => {
 
     <!-- 组局者：申请管理 / 完成搭局 -->
     ${p.is_author && ['open', 'full'].includes(p.status) ? `
-    <div class="section-title">📋 申请管理</div>
+    <div class="section-title">申请管理</div>
     <div id="join-list">${UI.loading()}</div>
     <div style="padding:0 14px 12px;">
-      <button class="btn ghost block" id="btn-done">✅ 搭局已完成（开启互评）</button>
+      <button class="btn ghost block" id="btn-done">${UI.icon('check', 14)} 搭局已完成（开启互评）</button>
     </div>` : ''}
 
     ${p.is_author && p.status === 'done' ? `
-    <div class="section-title">⭐ 搭后互评</div>
+    <div class="section-title">搭后互评</div>
     <div class="card" style="margin:0 14px 12px;" id="rate-panel">${UI.loading()}</div>` : ''}
 
     <!-- 评论区 -->
-    <div class="section-title" id="comments-anchor">💬 评论区（${p.comments_count}）</div>
+    <div class="section-title" id="comments-anchor">评论区（${p.comments_count}）</div>
     <div id="comments">${UI.loading()}</div>
     ${API.isLogin() ? `
     <div style="padding:0 14px 20px;">
@@ -136,13 +136,13 @@ App.register('post', async (el, seg) => {
     if (!API.isLogin()) return '登录后申请加入';
     if (p.is_author) return '这是我发布的搭局';
     if (p.status !== 'open') return '该搭局已停止招募';
-    if (p.my_join === 'pending') return '⏳ 已申请，等待组局者通过';
-    if (p.my_join === 'approved') return '✅ 已通过，去聊天';
+    if (p.my_join === 'pending') return '已申请，等待组局者通过';
+    if (p.my_join === 'approved') return `${UI.icon('check-circle', 14)} 已通过，去聊天`;
     if (p.my_join === 'rejected') return '重新申请';
     return '申请加入';
   }
 
-  // 主按钮不可操作态（组局者视角/非招募中/已申请）→ 置灰
+  // 主按钮不可操作态（组局者视角/非招募中/已申请）时置灰
   function joinDisabled() {
     const p = post;
     if (!API.isLogin()) return false;
@@ -183,7 +183,7 @@ App.register('post', async (el, seg) => {
       if (!yes) return;
       try {
         await API.put(`/posts/${pid}`, { status: 'done' });
-        UI.toast('已开启互评 🎉');
+        UI.toast('互评已开启');
         load();
       } catch (err) { UI.toast(err.message); }
     });
@@ -209,7 +209,7 @@ App.register('post', async (el, seg) => {
       try {
         await API.post(`/posts/${pid}/join`, { message: s.el.querySelector('#f-msg').value });
         s.close();
-        UI.toast('已提交申请，等待组局者通过 🙌');
+        UI.toast('已提交申请，等待组局者通过');
         load();
       } catch (err) { UI.toast(err.message); }
     };
@@ -232,7 +232,7 @@ App.register('post', async (el, seg) => {
     try {
       const list = await API.get(`/posts/${pid}/comments`);
       if (!list.length) {
-        box.innerHTML = `<div style="text-align:center; padding:20px; color:var(--text-3); font-size:13px;">还没有评论，来抢沙发～</div>`;
+        box.innerHTML = `<div style="text-align:center; padding:20px; color:var(--text-3); font-size:13px;">还没有评论，来抢沙发</div>`;
         return;
       }
       box.innerHTML = list.map((c) => `
@@ -248,7 +248,7 @@ App.register('post', async (el, seg) => {
         a.onclick = () => App.navigate('#/user/' + list[i].user.id);
       });
     } catch (err) {
-      box.innerHTML = UI.empty('😵', '评论加载失败', err.message);
+      box.innerHTML = UI.empty('alert-circle', '评论加载失败', err.message);
     }
   }
 
@@ -267,11 +267,11 @@ App.register('post', async (el, seg) => {
             <div style="font-size:14px; font-weight:650; display:flex; align-items:center; gap:5px;">
               ${UI.esc(j.user.nickname)} ${UI.genderBadge(j.user.gender)}
               ${j.user.verify_real ? '<span class="vbadge real">真人</span>' : ''}
-              ${j.user.verify_student ? '<span class="vbadge real">🎓</span>' : ''}
+              ${j.user.verify_student ? '<span class="vbadge real">学生</span>' : ''}
               <span class="pill gray" style="font-size:10px;">搭力 ${j.user.credit}</span>
             </div>
             ${j.message ? `<div style="font-size:13px; color:var(--text-2); margin-top:2px; white-space:pre-wrap;">${UI.esc(j.message)}</div>` : ''}
-            <div style="font-size:11px; color:var(--text-3); margin-top:2px;">${UI.timeAgo(j.created_at)}申请 · ${j.status === 'pending' ? '待处理' : j.status === 'approved' ? '✅ 已通过' : j.status === 'rejected' ? '已婉拒' : '已退出'}</div>
+            <div style="font-size:11px; color:var(--text-3); margin-top:2px;">${UI.timeAgo(j.created_at)}申请 · ${j.status === 'pending' ? '待处理' : j.status === 'approved' ? '已通过' : j.status === 'rejected' ? '已婉拒' : '已退出'}</div>
           </div>
           ${j.status === 'pending' ? `
           <div style="display:flex; gap:6px; flex-shrink:0;">
@@ -283,7 +283,7 @@ App.register('post', async (el, seg) => {
         b.onclick = async () => {
           try {
             await API.post(`/posts/${pid}/joins/${b.dataset.approve}/approve`, { approve: true });
-            UI.toast('已通过 ✅ 对方会收到通知');
+            UI.toast('已通过，对方会收到通知');
             load();
           } catch (err) { UI.toast(err.message); }
         };
@@ -298,7 +298,7 @@ App.register('post', async (el, seg) => {
         };
       });
     } catch (err) {
-      box.innerHTML = UI.empty('😵', '加载失败', err.message);
+      box.innerHTML = UI.empty('alert-circle', '加载失败', err.message);
     }
   }
 
@@ -316,7 +316,7 @@ App.register('post', async (el, seg) => {
           ${UI.avatarHTML(j.user)}
           <div style="flex:1;">
             <div style="font-size:14.5px; font-weight:650;">${UI.esc(j.user.nickname)}</div>
-            <div class="stars" id="stars-${j.user.id}">★★★★★</div>
+            <div class="stars" id="stars-${j.user.id}">${UI.starRow(5, 15)}</div>
           </div>
           <button class="btn ghost sm" data-rate="${j.user.id}">评价 TA</button>
         </div>`).join('') + `<div style="font-size:12px; color:var(--text-3); margin-top:8px;">互评完成双方各得搭力值，差评会扣分，请如实评价</div>`;
@@ -332,7 +332,7 @@ App.register('post', async (el, seg) => {
     let stars = 5;
     const meta = { rate_tags: ['守时', '靠谱', '友善', '有趣', '聊得来', '再次约'] };
     const s = UI.sheet('给搭子打分', `
-      <div style="text-align:center; font-size:34px; letter-spacing:6px; padding:6px 0;" id="star-pick">★★★★★</div>
+      <div style="display:flex; justify-content:center; gap:8px; padding:8px 0; color:var(--warning);" id="star-pick"></div>
       <div style="text-align:center; font-size:13px; color:var(--text-3); margin-bottom:12px;" id="star-text">非常满意，还想再约！</div>
       <div id="tag-pick">${meta.rate_tags.map((t) => `<span class="tag" data-tag="${t}">${t}</span>`).join('')}</div>
       <textarea id="f-rc" class="textarea" placeholder="写点什么（选填）" style="margin-top:10px;"></textarea>
@@ -340,14 +340,19 @@ App.register('post', async (el, seg) => {
 
     const starTexts = ['', '很糟糕', '不太好', '一般般', '满意', '非常满意，还想再约！'];
     const starPick = s.el.querySelector('#star-pick');
-    starPick.onclick = (e) => {
-      const rect = starPick.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      stars = Math.max(1, Math.min(5, Math.ceil((x / rect.width) * 5)));
-      starPick.innerHTML = '★'.repeat(stars) + '☆'.repeat(5 - stars);
-      starPick.style.color = 'var(--accent)';
-      s.el.querySelector('#star-text').textContent = starTexts[stars];
+    // EM-12：SVG 星评控件（5 星整，无半星；选中实心 fill=currentColor）
+    const paintStars = (n) => {
+      starPick.innerHTML = Array.from({ length: 5 }, (_, i) => UI.icon('star', 22, '', i < n)).join('');
     };
+    paintStars(stars);
+    [...starPick.children].forEach((svg, i) => {
+      svg.style.cursor = 'pointer';
+      svg.addEventListener('click', () => {
+        stars = i + 1;
+        paintStars(stars);
+        s.el.querySelector('#star-text').textContent = starTexts[stars];
+      });
+    });
     const picked = new Set();
     s.el.querySelectorAll('[data-tag]').forEach((t) => {
       t.onclick = () => {
@@ -363,7 +368,7 @@ App.register('post', async (el, seg) => {
           tags: [...picked], comment: s.el.querySelector('#f-rc').value,
         });
         s.close();
-        UI.toast('评价成功，感谢反馈 💛');
+        UI.toast('评价成功，感谢反馈');
         load();
       } catch (err) { UI.toast(err.message); }
     };

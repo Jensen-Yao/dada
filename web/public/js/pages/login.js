@@ -6,7 +6,7 @@ App.register('login', async (el) => {
   function html() {
     return `
     <div class="login-hero2">
-      <div class="login-logo2"><img src="/img/logo.svg" alt="搭搭" onerror="this.remove();this.parentNode.textContent='🤝';"></div>
+      <div class="login-logo2"><img src="/img/logo.svg" alt="搭搭" onerror="this.remove();this.parentNode.textContent='搭搭';"></div>
       <h1 class="login-title2">搭搭</h1>
       <p class="login-slogan2">万物皆可搭，找人别犯难<br>饭搭 · 学习搭 · 运动搭 · 旅行搭…</p>
     </div>
@@ -34,10 +34,10 @@ App.register('login', async (el) => {
       <div style="text-align:center; font-size:11.5px; color:var(--text-3); margin-top:8px;">注册即代表同意<a href="#/legal/terms" style="color:var(--primary-deep); font-weight:600; text-decoration:none;">《用户协议》</a>与<a href="#/legal/privacy" style="color:var(--primary-deep); font-weight:600; text-decoration:none;">《隐私政策》</a></div>
       <div style="text-align:center; margin-top:6px;">
         <button id="btn-switch" style="color: var(--primary-deep); font-size: 14px; font-weight:600;">
-          ${mode === 'login' ? '没有账号？注册一个 →' : '已有账号？去登录 →'}
+          ${mode === 'login' ? '没有账号？去注册' : '已有账号？去登录'}
         </button>
       </div>
-      <button id="btn-visit" style="text-align:center; color: var(--text-3); font-size: 13px; margin-top:2px;">先随便逛逛 👀</button>
+      <button id="btn-visit" style="text-align:center; color: var(--text-3); font-size: 13px; margin-top:2px;">先随便逛逛</button>
       <div class="login-demo2">
         演示账号：xiaoyu / 123456（已认证用户）<br>管理员：admin / 123456（运营后台）
       </div>

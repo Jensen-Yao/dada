@@ -23,11 +23,11 @@ App.register('square', async (el, _seg, query) => {
   }
 
   function renderHeader() {
-    const cats = [{ key: '', name: '全部', emoji: '🧭' }, ...meta.categories];
+    const cats = [{ key: '', name: '全部' }, ...meta.categories];
     return `
     <div class="navbar">
       <div class="navbar-inner">
-        <div class="navbar-title" style="text-align:left; font-size:20px; font-weight:800;">搭搭</div>
+        <div class="navbar-title" style="text-align:left; font-size:var(--fs-title); font-weight:800;">搭搭</div>
         <button class="navbar-btn" id="btn-city" style="font-size:13px; width:auto; padding:0 10px; background:var(--primary-soft); color:var(--primary-deep); border-radius:10px; font-weight:600; gap:4px;">${UI.icon('location', 13)}${UI.esc(state.city || '全部城市')}</button>
         <button class="navbar-btn" id="btn-notif" style="position:relative">${UI.icon('bell', 20)}</button>
       </div>
@@ -40,7 +40,7 @@ App.register('square', async (el, _seg, query) => {
       <div class="navbar-sub" id="cat-bar">
         ${cats.map((c) => `
           <button class="pill ${state.category === c.key ? '' : 'gray'}" data-cat="${c.key}" style="white-space:nowrap; padding:5px 13px; font-size:12.5px; flex-shrink:0;">
-            ${c.emoji} ${c.name}
+            ${c.name}
           </button>`).join('')}
         <button class="pill ${state.sort === 'hot' ? '' : 'gray'}" id="btn-sort" style="white-space:nowrap; padding:5px 13px; font-size:12.5px; flex-shrink:0;">热门</button>
       </div>
@@ -66,10 +66,10 @@ App.register('square', async (el, _seg, query) => {
   }
 
   function catBarHTML() {
-    const cats = [{ key: '', name: '全部', emoji: '🧭' }, ...meta.categories];
+    const cats = [{ key: '', name: '全部' }, ...meta.categories];
     return cats.map((c) => `
       <button class="pill ${state.category === c.key && !(c.key === '' && state.sort === 'hot') ? '' : 'gray'}" data-cat="${c.key}" style="white-space:nowrap; padding:5px 13px; font-size:12.5px; flex-shrink:0;">
-        ${c.emoji} ${c.name}
+        ${c.name}
       </button>`).join('') + `<button class="pill ${state.sort === 'hot' ? '' : 'gray'}" id="btn-sort" style="white-space:nowrap; padding:5px 13px; font-size:12.5px; flex-shrink:0;">热门</button>`;
   }
 
@@ -96,7 +96,7 @@ App.register('square', async (el, _seg, query) => {
       const data = await fetchList();
       // H5-06：筛选/分页刷新时整容器重绘（columns 下增量插入会重排列序）
       if (!data.list.length) {
-        listEl.innerHTML = UI.empty('🔍', '这里还没有搭局', '换个城市或分类看看，或者自己发一个！');
+        listEl.innerHTML = UI.empty('search', '这里还没有搭局', '换个城市或分类看看，或者自己发一个');
         return;
       }
       listEl.innerHTML = `<div class="wf">${data.list.map(postCard).join('')}</div>`;
@@ -104,7 +104,7 @@ App.register('square', async (el, _seg, query) => {
         c.onclick = () => App.navigate('#/post/' + c.dataset.id);
       });
     } catch (err) {
-      listEl.innerHTML = UI.empty('😵', '加载失败', err.message);
+      listEl.innerHTML = UI.empty('alert-circle', '加载失败', err.message);
     }
   }
 
