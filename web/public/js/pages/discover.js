@@ -7,9 +7,12 @@ App.register('discover', async (el) => {
   <div id="feed">${UI.loading()}</div>`;
 
   function card(p) {
+    const cover = p.images?.length
+      ? `<img class="post-cover" src="${UI.esc(p.images[0])}" loading="lazy" alt="">`
+      : `<div class="post-emoji">${p.category_emoji || '✨'}</div>`;
     return `
     <div class="card post-card" data-id="${p.id}">
-      <div class="post-emoji">${p.category_emoji || '✨'}</div>
+      ${cover}
       <div class="post-main">
         <div class="post-title">${UI.esc(p.title)}</div>
         <div class="post-meta">

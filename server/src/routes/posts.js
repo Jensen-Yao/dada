@@ -1,4 +1,8 @@
 import { Router } from 'express';
+import multer from 'multer';
+import path from 'node:path';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { db, now } from '../db.js';
 import {
   requireAuth, optionalAuth, ok, publicUser, safeJSON,
@@ -7,6 +11,34 @@ import {
 } from '../util.js';
 
 export const postsRouter = Router();
+
+// ---------- 搭局配图上传 ----------
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const UPLOAD_DIR = path.join(__dirname, '..', 'data', 'uploads');
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+const imageUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
+    filename: (_req, file, cb) => cb(null, `post_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${path.extname(file.originalname) || '.jpg'}`),
+  }),
+  limits: { fileSize: 8 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (/^image\/(png|jpe?g|webp|gif)$/.test(file.mimetype)) cb(null, true);
+    else cb(new Error('仅支持图片文件'));
+  },
+});
+
+postsRouter.post('/:id/images', requireAuth, imageUpload.array('images', 3), (req, res) => {
+  const p = db.prepare('SELECT * FROM posts WHERE id = ?').get(parseInt(req.params.id));
+  if (!p) return res.status(404).json({ error: '搭局不存在' });
+  if (p.user_id !== req.user.id) return res.status(403).json({ error: '只能给自己的搭局传图' });
+  if (!req.files?.length) return res.status(400).json({ error: '请选择图片' });
+  const current = safeJSON(p.images, []);
+  const added = req.files.map((f) => `/uploads/${f.filename}`);
+  const merged = [...current, ...added].slice(0, 6);
+  db.prepare('UPDATE posts SET images = ? WHERE id = ?').run(JSON.stringify(merged), p.id);
+  res.json(ok({ images: merged }));
+});
 
 function postView(p, viewer) {
   const author = db.prepare('SELECT * FROM users WHERE id = ?').get(p.user_id);
@@ -30,6 +62,7 @@ function postView(p, viewer) {
     gender_req: p.gender_req,
     gender_req_name: { any: '不限', female: '仅限女生', male: '仅限男生' }[p.gender_req],
     requirements: p.requirements,
+    images: safeJSON(p.images, []),
     status: p.status,
     approved_count: approved,
     likes_count: p.likes_count,

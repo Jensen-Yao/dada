@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240" viewBox="0 0 240 240">
+  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#FDE68A"/><stop offset="1" stop-color="#FBBF24"/>
+  </linearGradient></defs>
+  <rect width="240" height="240" fill="url(#g)"/>
+  <circle cx="34" cy="42" r="52" fill="#ffffff" opacity="0.18"/>
+  <circle cx="208" cy="200" r="66" fill="#ffffff" opacity="0.14"/>
+  <circle cx="196" cy="34" r="20" fill="#ffffff" opacity="0.22"/>
+  <text x="120" y="128" font-size="104" text-anchor="middle" dominant-baseline="central">🌟</text>
+</svg>

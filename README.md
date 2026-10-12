@@ -2,6 +2,14 @@
 
 > 万物皆可搭，找人别犯难 —— 一个专注于"找搭子"的轻社交 App
 
+| 广场 | 搭局详情 | 聊天（安全提示+导流打码） | 我的（搭力值） |
+|---|---|---|---|
+| ![广场](docs/screenshots/square.png) | ![详情](docs/screenshots/post-detail.png) | ![聊天](docs/screenshots/chat.png) | ![我的](docs/screenshots/me.png) |
+
+| 发布（可传图） | 发现推荐 | 安全中心 | 个人主页 |
+|---|---|---|---|
+| ![发布](docs/screenshots/publish.png) | ![发现](docs/screenshots/discover.png) | ![安全](docs/screenshots/safety.png) | ![主页](docs/screenshots/user-profile.png) |
+
 **搭搭**是一个解决"找搭子"需求的完整产品：饭搭、学习搭、运动搭、旅行搭、游戏搭……发布搭局、申请加入、站内聊天、搭后互评，全流程闭环。针对搭子赛道普遍存在的**微信黑洞、人性衰退、女性安全、诈骗导流**四大顽疾做了系统性设计（详见 `docs/research.md`）。
 
 ## ✨ 核心特性

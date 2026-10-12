@@ -44,6 +44,10 @@ App.register('post', async (el, seg) => {
           <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap;">${statusPill(p)}<span class="pill">${UI.esc(p.fee_mode_name)}</span>${p.gender_req !== 'any' ? `<span class="pill blue">${p.gender_req === 'female' ? '♀ 仅限女生' : '♂ 仅限男生'}</span>` : ''}</div>
         </div>
       </div>
+      ${p.images?.length ? `
+      <div class="gallery" style="margin-top:12px; padding:0;">
+        ${p.images.map((src) => `<img src="${UI.esc(src)}" loading="lazy" alt="">`).join('')}
+      </div>` : ''}
       ${p.content ? `<div style="margin-top:12px; font-size:14.5px; line-height:1.7; color:var(--text); white-space:pre-wrap;">${UI.esc(p.content)}</div>` : ''}
       <div style="margin-top:14px; padding-top:12px; border-top:0.5px solid var(--line);">
         ${metaRow('📍', `${UI.esc(p.city)}${p.location_name ? ' · ' + UI.esc(p.location_name) : ''}`)}

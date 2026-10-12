@@ -15,6 +15,11 @@ db.exec('PRAGMA foreign_keys = ON;');
 
 export const SCHEMA_VERSION = 1;
 
+// 轻量迁移：posts.images（老库兼容）
+try {
+  db.exec("ALTER TABLE posts ADD COLUMN images TEXT NOT NULL DEFAULT '[]'");
+} catch { /* 列已存在 */ }
+
 db.exec(`
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,6 +60,7 @@ CREATE TABLE IF NOT EXISTS posts (
   fee_mode TEXT NOT NULL DEFAULT 'aa' CHECK (fee_mode IN ('free','aa','treat')),
   gender_req TEXT NOT NULL DEFAULT 'any' CHECK (gender_req IN ('any','female','male')),
   requirements TEXT DEFAULT '',
+  images TEXT NOT NULL DEFAULT '[]',
   status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','full','closed','done','expired')),
   likes_count INTEGER NOT NULL DEFAULT 0,
   comments_count INTEGER NOT NULL DEFAULT 0,

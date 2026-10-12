@@ -20,9 +20,12 @@ App.register('square', async (el, _seg, query) => {
 
   function postCard(p) {
     const c = UI.creditLabel(p.author.credit);
+    const cover = p.images?.length
+      ? `<img class="post-cover" src="${UI.esc(p.images[0])}" loading="lazy" alt="">`
+      : `<div class="post-emoji">${p.category_emoji}</div>`;
     return `
     <div class="card post-card" data-id="${p.id}">
-      <div class="post-emoji">${p.category_emoji}</div>
+      ${cover}
       <div class="post-main">
         <div style="display:flex; align-items:flex-start; gap:6px;">
           <div class="post-title" style="flex:1">${UI.esc(p.title)}</div>

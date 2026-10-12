@@ -99,6 +99,10 @@ img { display: block; max-width: 100%; }
   display: flex; align-items: center; justify-content: center; font-size: 26px;
   background: linear-gradient(135deg, #FFF4EC, #FFE8DA);
 }
+.post-cover {
+  width: 52px; height: 52px; border-radius: 16px; flex-shrink: 0; object-fit: cover;
+  background: var(--line);
+}
 .post-main { flex: 1; min-width: 0; }
 .post-title { font-size: 15.5px; font-weight: 650; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .post-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
@@ -261,6 +265,24 @@ img { display: block; max-width: 100%; }
 /* 搜索栏 */
 .search-bar { display: flex; align-items: center; gap: 8px; background: var(--card); border-radius: 14px; padding: 9px 13px; box-shadow: var(--shadow); }
 .search-bar input { flex: 1; font-size: 14px; }
+
+/* 图片集 */
+.gallery { display: flex; gap: 8px; overflow-x: auto; padding: 0 14px 2px; scrollbar-width: none; }
+.gallery::-webkit-scrollbar { display: none; }
+.gallery img { width: 210px; height: 128px; border-radius: 16px; object-fit: cover; flex-shrink: 0; background: var(--line); }
+
+/* 发布页选图 */
+.img-pick-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.img-pick { width: 84px; height: 84px; border-radius: 14px; object-fit: cover; position: relative; }
+.img-pick-add {
+  width: 84px; height: 84px; border-radius: 14px; border: 1.5px dashed var(--text-3);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  color: var(--text-3); font-size: 11px; background: var(--card);
+}
+.img-pick-del {
+  position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; border-radius: 50%;
+  background: rgba(28,30,32,0.8); color: #fff; font-size: 11px; display: flex; align-items: center; justify-content: center;
+}
 
 /* 骨架屏 */
 .skeleton { background: linear-gradient(90deg, var(--line) 25%, #F8F9FB 50%, var(--line) 75%); background-size: 200% 100%; animation: sk 1.2s infinite; border-radius: 12px; }

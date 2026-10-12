@@ -8,26 +8,26 @@ const t = now();
 const hash = bcrypt.hashSync('123456', 10);
 
 const users = [
-  ['admin', '搭搭小助手', 'female', 1996, '北京', '朝阳区', '', '平台运营', 'ENFJ', '搭搭官方账号，维护社区安全与秩序～', '["官方", "靠谱"]', 1, 1, 1],
-  ['xiaoyu', '小鱼干', 'female', 2000, '北京', '海淀区', '北京大学', '学生', 'INFP', '想找饭搭子和电影搭子，周末喜欢citywalk 🐟', '["美食", "电影", "citywalk"]', 1, 1, 0],
-  ['runner', '阿跑', 'male', 1998, '北京', '朝阳区', '', '互联网从业者', 'ESTP', '马拉松爱好者，早起跑步的搭子有吗', '["跑步", "健身", "马拉松"]', 0, 1, 0],
-  ['momo', 'momo', 'female', 2001, '北京', '海淀区', '清华大学', '学生', 'ENFP', 'e人但社恐，想找学习搭子互相监督', '["自习", "图书馆", "咖啡"]', 1, 0, 0],
-  ['laoxu', '老徐', 'male', 1990, '北京', '西城区', '', '摄影师', 'ISTP', '扫街拍照，周末约拍互免', '["摄影", "扫街", "胶片"]', 0, 1, 0],
-  ['kiki', 'KiKi', 'female', 1999, '上海', '静安区', '', '设计师', 'INFJ', 'livehouse常驻，找演出搭子', '["livehouse", "摇滚", "探店"]', 0, 1, 0],
-  ['daye', '王大爷', 'male', 1975, '北京', '海淀区', '', '退休', 'ISFJ', '遛狗钓鱼下象棋，年轻人带我一个', '["遛狗", "钓鱼", "象棋"]', 0, 0, 0],
-  ['sherry', 'Sherry', 'female', 1997, '深圳', '南山区', '', '产品经理', 'ENTJ', '爬山、飞盘、露营，周末不宅', '["爬山", "飞盘", "露营"]', 0, 1, 0],
-  ['xiaoke', '小柯', 'male', 2002, '北京', '昌平区', '北京航空航天大学', '学生', 'INTP', '游戏开黑（瓦/撸/农），剧本杀拼车', '["游戏", "剧本杀", "桌游"]', 1, 0, 0],
-  ['meimei', '美美', 'female', 1995, '成都', '锦江区', '', '自由职业', 'ESFP', '火锅探店选手，成都美食地图活地图', '["火锅", "探店", "美甲"]', 0, 0, 0],
+  ['admin', '搭搭小助手', 'female', 1996, '北京', '朝阳区', '', '平台运营', 'ENFJ', '搭搭官方账号，维护社区安全与秩序～', '["官方", "靠谱"]', 1, 1, 1, 'u10'],
+  ['xiaoyu', '小鱼干', 'female', 2000, '北京', '海淀区', '北京大学', '学生', 'INFP', '想找饭搭子和电影搭子，周末喜欢citywalk 🐟', '["美食", "电影", "citywalk"]', 1, 1, 0, 'u5'],
+  ['runner', '阿跑', 'male', 1998, '北京', '朝阳区', '', '互联网从业者', 'ESTP', '马拉松爱好者，早起跑步的搭子有吗', '["跑步", "健身", "马拉松"]', 0, 1, 0, 'u2'],
+  ['momo', 'momo', 'female', 2001, '北京', '海淀区', '清华大学', '学生', 'ENFP', 'e人但社恐，想找学习搭子互相监督', '["自习", "图书馆", "咖啡"]', 1, 0, 0, 'u4'],
+  ['laoxu', '老徐', 'male', 1990, '北京', '西城区', '', '摄影师', 'ISTP', '扫街拍照，周末约拍互免', '["摄影", "扫街", "胶片"]', 0, 1, 0, 'u7'],
+  ['kiki', 'KiKi', 'female', 1999, '上海', '静安区', '', '设计师', 'INFJ', 'livehouse常驻，找演出搭子', '["livehouse", "摇滚", "探店"]', 0, 1, 0, 'u9'],
+  ['daye', '王大爷', 'male', 1975, '北京', '海淀区', '', '退休', 'ISFJ', '遛狗钓鱼下象棋，年轻人带我一个', '["遛狗", "钓鱼", "象棋"]', 0, 0, 0, 'u8'],
+  ['sherry', 'Sherry', 'female', 1997, '深圳', '南山区', '', '产品经理', 'ENTJ', '爬山、飞盘、露营，周末不宅', '["爬山", "飞盘", "露营"]', 0, 1, 0, 'u3'],
+  ['xiaoke', '小柯', 'male', 2002, '北京', '昌平区', '北京航空航天大学', '学生', 'INTP', '游戏开黑（瓦/撸/农），剧本杀拼车', '["游戏", "剧本杀", "桌游"]', 1, 0, 0, 'u6'],
+  ['meimei', '美美', 'female', 1995, '成都', '锦江区', '', '自由职业', 'ESFP', '火锅探店选手，成都美食地图活地图', '["火锅", "探店", "美甲"]', 0, 0, 0, 'u1'],
 ];
 
 const uidByUsername = {};
-for (const [username, nickname, gender, birth, city, district, school, occupation, mbti, bio, tags, vs, vr, admin] of users) {
+for (const [username, nickname, gender, birth, city, district, school, occupation, mbti, bio, tags, vs, vr, admin, avatar] of users) {
   const exist = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
   if (exist) { uidByUsername[username] = exist.id; continue; }
   const info = db.prepare(`
-    INSERT INTO users (username, password_hash, nickname, gender, birth_year, city, district, school, occupation, mbti, bio, tags, verify_student, verify_real, is_admin, credit, created_at, last_active_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-  `).run(username, hash, nickname, gender, birth, city, district, school, occupation, mbti, bio, tags, vs, vr, admin, 600 + Math.floor(Math.random() * 200), t - Math.floor(Math.random() * 90 * 86400000), t - Math.floor(Math.random() * 3 * 86400000));
+    INSERT INTO users (username, password_hash, nickname, avatar, gender, birth_year, city, district, school, occupation, mbti, bio, tags, verify_student, verify_real, is_admin, credit, created_at, last_active_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  `).run(username, hash, nickname, `/img/avatars/${avatar}.svg`, gender, birth, city, district, school, occupation, mbti, bio, tags, vs, vr, admin, 600 + Math.floor(Math.random() * 200), t - Math.floor(Math.random() * 90 * 86400000), t - Math.floor(Math.random() * 3 * 86400000));
   uidByUsername[username] = Number(info.lastInsertRowid);
 }
 
@@ -51,9 +51,10 @@ for (const [username, category, title, content, city, loc, meet, need, fee, greq
   const exist = db.prepare('SELECT id FROM posts WHERE title = ?').get(title);
   if (exist) { pidByIndex.push(exist.id); continue; }
   const info = db.prepare(`
-    INSERT INTO posts (user_id, category, title, content, city, location_name, meet_time, need_count, fee_mode, gender_req, requirements, status, likes_count, views_count, created_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,'open',?,?,?)
+    INSERT INTO posts (user_id, category, title, content, city, location_name, meet_time, need_count, fee_mode, gender_req, requirements, images, status, likes_count, views_count, created_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'open',?,?,?)
   `).run(uidByUsername[username], category, title, content, city, loc, meet, need, fee, greq, req,
+    JSON.stringify([`/img/covers/${category}.svg`]),
     Math.floor(Math.random() * 20), 50 + Math.floor(Math.random() * 500), t - Math.floor(Math.random() * 7 * 86400000));
   pidByIndex.push(Number(info.lastInsertRowid));
 }

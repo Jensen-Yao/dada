@@ -88,6 +88,14 @@ App.register('publish', async (el) => {
     </div>
 
     <div class="form-item">
+      <label>配图（最多3张，让搭子更想加入）</label>
+      <div class="img-pick-row" id="img-picks">
+        <div class="img-pick-add" id="img-add">📷<span>添加图片</span></div>
+      </div>
+      <input type="file" id="f-images" accept="image/*" multiple class="hidden">
+    </div>
+
+    <div class="form-item">
       <label>其他要求（选填）</label>
       <input id="f-req" class="input" maxlength="100" placeholder="如：能吃辣、不迟到、有基础">
     </div>
@@ -126,6 +134,44 @@ App.register('publish', async (el) => {
   $('cnt-minus').onclick = () => { state.need_count = Math.max(1, state.need_count - 1); $('cnt-val').textContent = state.need_count; };
   $('cnt-plus').onclick = () => { state.need_count = Math.min(20, state.need_count + 1); $('cnt-val').textContent = state.need_count; };
 
+  // ---------- 配图选择（本地预览，创建后上传） ----------
+  const pickedFiles = [];
+  const imgAdd = $('img-add');
+  const imgInput = $('f-images');
+  imgAdd.onclick = () => imgInput.click();
+  imgInput.addEventListener('change', () => {
+    for (const f of imgInput.files) {
+      if (pickedFiles.length >= 3) { UI.toast('最多 3 张配图'); break; }
+      if (f.size > 8 * 1024 * 1024) { UI.toast('单张图片不能超过 8MB'); continue; }
+      pickedFiles.push(f);
+    }
+    imgInput.value = '';
+    renderPicks();
+  });
+  function renderPicks() {
+    const row = $('img-picks');
+    row.innerHTML = pickedFiles.map((f, i) => `
+      <div style="position:relative;">
+        <img class="img-pick" src="${URL.createObjectURL(f)}" alt="">
+        <button class="img-pick-del" data-del="${i}">✕</button>
+      </div>`).join('') +
+      (pickedFiles.length < 3 ? `<div class="img-pick-add" id="img-add">📷<span>添加图片</span></div>` : '');
+    row.querySelector('#img-add')?.addEventListener('click', () => imgInput.click());
+    row.querySelectorAll('[data-del]').forEach((b) => {
+      b.onclick = () => { pickedFiles.splice(parseInt(b.dataset.del), 1); renderPicks(); };
+    });
+  }
+  async function uploadImages(pid) {
+    if (!pickedFiles.length) return;
+    const fd = new FormData();
+    for (const f of pickedFiles) fd.append('images', f);
+    await fetch(`/api/posts/${pid}/images`, {
+      method: 'POST',
+      headers: API.token() ? { Authorization: `Bearer ${API.token()}` } : {},
+      body: fd,
+    });
+  }
+
   $('btn-publish').onclick = async () => {
     if (!state.category) return UI.toast('先选一个搭子类型吧');
     const title = $('f-title').value.trim();
@@ -144,6 +190,7 @@ App.register('publish', async (el) => {
         gender_req: state.gender_req, requirements: $('f-req').value.trim(),
       });
       UI.toast('发布成功，等搭子来找你 🎉');
+      try { await uploadImages(p.id); } catch { /* 配图上传失败不阻塞 */ }
       App.navigate('#/post/' + p.id);
     } catch (err) {
       UI.toast(err.message);
