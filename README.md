@@ -1,10 +1,18 @@
 # 搭搭 🤝
 
-> 万物皆可搭，找人别犯难 —— 一个专注于"找搭子"的轻社交 App
+> 万物皆可搭，找人别犯难 —— 一个专注于"找搭子"的轻社交 App（H5 · PWA · 桌面网页 · 可打包App）
 
-| 广场 | 搭局详情 | 聊天（安全提示+导流打码） | 我的（搭力值） |
+**H5 移动端**（对标小红书：双列瀑布流 / 大图轮播 / 底部操作栏）：
+
+| 广场·瀑布流 | 搭局详情·轮播 | 聊天（安全提示+导流打码） | 我的（三栏数据+网格） |
 |---|---|---|---|
 | ![广场](docs/screenshots/square.png) | ![详情](docs/screenshots/post-detail.png) | ![聊天](docs/screenshots/chat.png) | ![我的](docs/screenshots/me.png) |
+
+**桌面网页端**（侧边栏 + 多列瀑布流 + 聊天左右分栏）：
+
+| 桌面广场·4列 | 桌面聊天·分栏 |
+|---|---|
+| ![桌面广场](docs/screenshots/desktop-square.png) | ![桌面聊天](docs/screenshots/desktop-conv.png) |
 
 | 发布（可传图） | 发现推荐 | 安全中心 | 个人主页 |
 |---|---|---|---|
@@ -96,6 +104,71 @@ rm server/data/dada.sqlite* && cd server && node src/seed.js
 ## 🗺️ 迭代路线
 
 详见 `docs/roadmap.md`。当前 v1.0 已完成MVP全功能闭环，后续规划：真实身份核验接入、LBS距离排序、搭局群聊、AI违规检测、小程序/原生端。
+
+## 📱 多端打包指南（PWA + Capacitor）
+
+> ⚠️ capacitor.config.json 的 server.url 当前为占位域名，真机打包前请改为你的部署地址；本地演示改为 http://<局域网IP>:3000
+
+搭搭 v2.0 是"一套代码，三端形态"：H5（主战场）→ PWA（可安装）→ Capacitor 原生壳（近原生）。三端共用 `web/public` 下的同一份零构建前端（C1 约束），不引入前端构建链。
+
+### 1. PWA 安装（零成本，推荐先验证）
+
+服务端已内置 `manifest.json` + Service Worker（`sw.js`），满足可安装条件：
+
+- 访问方式：手机浏览器打开 `https://<域名>/`（或本机 `http://localhost:3000`）
+- **Android Chrome**：地址栏右侧出现「安装」图标，或页面底部弹出「安装搭搭到桌面」横幅（可关闭，关闭后记录在 localStorage 不再提示）→ 点击安装，桌面生成独立图标
+- **iOS Safari**：手动「分享 → 添加到主屏幕」（iOS 无 `beforeinstallprompt` 事件，属平台限制）
+- 离线能力：静态资源 stale-while-revalidate、`/api` GET network-first 兜底缓存、`/uploads` cache-first；**`/ws` 与非 GET 请求绝不拦截**，聊天实时性不受影响
+- 注意：Service Worker 仅在 `https` 或 `localhost` 下注册（`app.js` 已做环境判断），局域网 IP + http 调试时不会注册，属预期行为
+
+### 2. Capacitor 原生壳（Android / iOS）
+
+仓库根已交付 `capacitor.config.json`（`webDir: web/public`，`server.url` 指向运行中的 H5，即"远程加载壳"方案：原生壳只负责套壳，业务仍走 `/api`、`/ws` 相对路径，后端零改造）。本仓库当前交付物为**可打包工程**——CI/本机无 Android SDK 时不产出 APK，按下面步骤在有 SDK 的机器上可独立出包。
+
+环境要求：JDK 17 + Android Studio（Android）；Xcode + macOS（iOS，可选）。
+
+```bash
+# ① 安装依赖（工具链依赖，不进 server 运行时）
+npm i -D @capacitor/cli
+npm i @capacitor/core @capacitor/android @capacitor/ios   # ios 无 macOS 环境可先跳过
+
+# ② 添加平台（首次执行会按 capacitor.config.json 生成 android/ ios/ 目录）
+npx cap add android
+npx cap add ios    # 可选
+
+# ③ 启动本地服务（原生壳加载 http://localhost:3000 或局域网地址）
+DADA_PORT=3000 node server/src/index.js
+
+# ④ 同步配置并打开原生工程
+npx cap sync
+npx cap open android   # 在 Android Studio 中运行/打包
+```
+
+### 3. Android 签名打包
+
+```bash
+# 生成签名 keystore（一次即可，妥善保管）
+keytool -genkey -v -keystore dada.keystore -alias dada -keyalg RSA -keysize 2048 -validity 10000
+
+# 打 release APK / AAB（在 android/ 目录下）
+cd android
+./gradlew assembleRelease   # APK：android/app/build/outputs/apk/release/
+./gradlew bundleRelease     # AAB（上架 Google Play 用）
+```
+
+签名配置：把 keystore 放到 `android/app/`，并在 `android/app/build.gradle` 的 `android.signingConfigs` 中配置 `storeFile / storePassword / keyAlias / keyPassword`（或用 `~/.gradle/gradle.properties` 存密码，避免提交仓库）。
+
+### 4. 图标与启动屏
+
+- PWA 图标：`web/public/img/icons/`（icon-192 / icon-512 / icon-180 / maskable-512，由 `scripts/gen-icons.mjs` 从 `img/logo.svg` 生成，见 APP-05）
+- Android/iOS 原生图标：`npx @capacitor/assets generate --iconBackgroundColor '#FF7A45'`（源图复用 gen-icons 输出），或直接在 Android Studio 的 Image Asset 中手工替换
+
+### 5. 注意事项与取舍
+
+- **server.url 指向**：当前指向 `http://localhost:3000`（本机演示）。生产部署改为 `https://<部署域名>`；用局域网 IP 调试时保持 `"cleartext": true`（Android 允许 http 明文），上线前务必收回
+- **androidScheme**：固定 `https`，保证 WebView 内 `fetch('/api')`、WebSocket `wss` 的混合内容策略正确
+- **后续升级路径（本地离线包）**：若希望 App 完全离线可用，可将 `server.url` 从配置中移除，Capacitor 会直接加载 `webDir` 内的静态文件，届时需把 API 地址改为绝对 URL 并处理跨域——本版不做，保持零构建
+- **本仓库不提交** `android/`、`ios/` 平台目录与 keystore；`npm i` 后按上文步骤生成即可
 
 ## 📄 License
 

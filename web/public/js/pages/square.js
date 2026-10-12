@@ -1,4 +1,4 @@
-/* ================= 广场页（搭局列表） ================= */
+/* ================= 广场页（搭局列表 · 双列瀑布流 H5-06~08） ================= */
 App.register('square', async (el, _seg, query) => {
   const meta = await App.meta();
   const state = {
@@ -19,37 +19,7 @@ App.register('square', async (el, _seg, query) => {
   }
 
   function postCard(p) {
-    const c = UI.creditLabel(p.author.credit);
-    const cover = p.images?.length
-      ? `<img class="post-cover" src="${UI.esc(p.images[0])}" loading="lazy" alt="">`
-      : `<div class="post-emoji">${p.category_emoji}</div>`;
-    return `
-    <div class="card post-card" data-id="${p.id}">
-      ${cover}
-      <div class="post-main">
-        <div style="display:flex; align-items:flex-start; gap:6px;">
-          <div class="post-title" style="flex:1">${UI.esc(p.title)}</div>
-          ${p.status === 'full' ? '<span class="pill gray" style="flex-shrink:0">已满员</span>' : '<span class="pill green" style="flex-shrink:0">招募中</span>'}
-        </div>
-        <div class="post-meta">
-          <span class="pill">📍 ${UI.esc(p.city)}</span>
-          ${p.meet_time ? `<span class="pill yellow">🕐 ${UI.esc(p.meet_time)}</span>` : ''}
-          ${p.gender_req !== 'any' ? `<span class="pill ${p.gender_req === 'female' ? 'blue' : ''}">${p.gender_req === 'female' ? '♀ 仅限女生' : '♂ 仅限男生'}</span>` : ''}
-          <span class="pill gray">${UI.esc(p.fee_mode_name)}</span>
-          <span class="pill gray">还缺 ${Math.max(0, p.need_count - p.approved_count)} 人</span>
-        </div>
-        <div class="post-footer">
-          <div class="post-author">
-            ${UI.avatarHTML(p.author)}
-            <span class="author-name">${UI.esc(p.author.nickname)} ${UI.genderBadge(p.author.gender)}</span>
-            ${p.author.verify_real ? '<span class="vbadge real">已真人认证</span>' : ''}
-            ${p.author.verify_student ? '<span class="vbadge real">🎓</span>' : ''}
-            <span class="pill ${c.cls}" style="margin-left:2px">${c.text}</span>
-          </div>
-          <div class="post-stats"><span>❤️ ${p.likes_count}</span><span>💬 ${p.comments_count}</span></div>
-        </div>
-      </div>
-    </div>`;
+    return UI.pinCard(p);
   }
 
   function renderHeader() {
@@ -58,12 +28,12 @@ App.register('square', async (el, _seg, query) => {
     <div class="navbar">
       <div class="navbar-inner">
         <div class="navbar-title" style="text-align:left; font-size:20px; font-weight:800;">搭搭</div>
-        <button class="navbar-btn" id="btn-city" style="font-size:13px; width:auto; padding:0 10px; background:var(--primary-soft); color:var(--primary-deep); border-radius:10px; font-weight:600;">📍${UI.esc(state.city || '全部城市')}</button>
-        <button class="navbar-btn" id="btn-notif" style="position:relative">🔔</button>
+        <button class="navbar-btn" id="btn-city" style="font-size:13px; width:auto; padding:0 10px; background:var(--primary-soft); color:var(--primary-deep); border-radius:10px; font-weight:600; gap:4px;">${UI.icon('location', 13)}${UI.esc(state.city || '全部城市')}</button>
+        <button class="navbar-btn" id="btn-notif" style="position:relative">${UI.icon('bell', 20)}</button>
       </div>
       <div style="padding: 0 14px 10px;">
         <div class="search-bar">
-          <span>🔍</span>
+          ${UI.icon('search', 16)}
           <input id="f-kw" placeholder="搜索搭局：火锅、自习、livehouse…" value="${UI.esc(state.keyword)}">
         </div>
       </div>
@@ -72,13 +42,13 @@ App.register('square', async (el, _seg, query) => {
           <button class="pill ${state.category === c.key ? '' : 'gray'}" data-cat="${c.key}" style="white-space:nowrap; padding:5px 13px; font-size:12.5px; flex-shrink:0;">
             ${c.emoji} ${c.name}
           </button>`).join('')}
-        <button class="pill ${state.sort === 'hot' ? '' : 'gray'}" id="btn-sort" style="white-space:nowrap; padding:5px 13px; font-size:12.5px; flex-shrink:0;">🔥 热门</button>
+        <button class="pill ${state.sort === 'hot' ? '' : 'gray'}" id="btn-sort" style="white-space:nowrap; padding:5px 13px; font-size:12.5px; flex-shrink:0;">热门</button>
       </div>
     </div>`;
   }
 
   async function render() {
-    el.innerHTML = renderHeader() + `<div id="list" style="padding-top:12px;">${UI.loading()}</div>`;
+    el.innerHTML = renderHeader() + `<div id="list">${UI.wfSkeleton(6)}</div>`;
 
     el.querySelector('#btn-notif').onclick = () => API.isLogin() ? App.navigate('#/notifications') : UI.requireLogin();
     el.querySelector('#f-kw').addEventListener('change', (e) => { state.keyword = e.target.value.trim(); refreshList(); });
@@ -100,7 +70,7 @@ App.register('square', async (el, _seg, query) => {
     return cats.map((c) => `
       <button class="pill ${state.category === c.key && !(c.key === '' && state.sort === 'hot') ? '' : 'gray'}" data-cat="${c.key}" style="white-space:nowrap; padding:5px 13px; font-size:12.5px; flex-shrink:0;">
         ${c.emoji} ${c.name}
-      </button>`).join('') + `<button class="pill ${state.sort === 'hot' ? '' : 'gray'}" id="btn-sort" style="white-space:nowrap; padding:5px 13px; font-size:12.5px; flex-shrink:0;">🔥 热门</button>`;
+      </button>`).join('') + `<button class="pill ${state.sort === 'hot' ? '' : 'gray'}" id="btn-sort" style="white-space:nowrap; padding:5px 13px; font-size:12.5px; flex-shrink:0;">热门</button>`;
   }
 
   function bindCatBar() {
@@ -124,12 +94,13 @@ App.register('square', async (el, _seg, query) => {
     const listEl = el.querySelector('#list');
     try {
       const data = await fetchList();
+      // H5-06：筛选/分页刷新时整容器重绘（columns 下增量插入会重排列序）
       if (!data.list.length) {
         listEl.innerHTML = UI.empty('🔍', '这里还没有搭局', '换个城市或分类看看，或者自己发一个！');
         return;
       }
-      listEl.innerHTML = data.list.map(postCard).join('');
-      listEl.querySelectorAll('.post-card').forEach((c) => {
+      listEl.innerHTML = `<div class="wf">${data.list.map(postCard).join('')}</div>`;
+      listEl.querySelectorAll('.pin-card').forEach((c) => {
         c.onclick = () => App.navigate('#/post/' + c.dataset.id);
       });
     } catch (err) {

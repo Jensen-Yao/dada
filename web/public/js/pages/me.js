@@ -1,31 +1,55 @@
-/* ================= 我的页面 ================= */
+/* ================= 我的页面（v2 · 对标小红书个人主页） ================= */
 App.register('me', async (el) => {
   const me = await API.get('/auth/me');
   window.__me = me;
   const c = UI.creditLabel(me.credit);
   const pct = Math.min(100, Math.round(((me.credit - 300) / 500) * 100));
 
+  // FE-A 契约图标（未落地时静默降级为空字符串，页面不报错）
+  const ic = (name, size = 24) => (typeof UI.icon === 'function' ? UI.icon(name, size) : '');
+
+  // 与 BE-02/BE-05 相同的确定性兜底规则（接口新字段未上线时同样不出错）
+  const coverOf = (p) => p.cover || (p.images || [])[0] || `/img/covers/${p.category}${p.id % 2 ? '-2' : ''}.svg`;
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+
+  const statusPill = (p) => {
+    if (p.my_join) {
+      const map = { pending: ['申请中', 'yellow'], approved: ['已通过', 'green'], rejected: ['未通过', 'gray'] };
+      return map[p.my_join] || ['已报名', 'gray'];
+    }
+    return { open: ['招募中', 'green'], full: ['已满员', 'gray'], done: ['已完成', 'blue'], closed: ['已关闭', 'gray'] }[p.status] || ['未知', 'gray'];
+  };
+
   el.innerHTML = `
-  <div class="me-header">
-    <div class="me-row">
-      ${UI.avatarHTML(me, 'xl')}
-      <div style="flex:1; min-width:0;">
-        <div class="me-name">
-          ${UI.esc(me.nickname)} ${UI.genderBadge(me.gender)}
-          ${me.verify_real ? '<span class="vbadge solid">已真人认证</span>' : ''}
-          ${me.verify_student ? '<span class="vbadge stu">🎓 学生认证</span>' : ''}
+  <div class="me2-hero">
+    <div class="me2-toprow">
+      <button class="me2-edit" id="btn-edit">编辑资料 ${ic('more', 14)}</button>
+    </div>
+    <div class="me2-user">
+      <div class="me2-avatar">${UI.avatarHTML(me)}</div>
+      <div class="me2-usermain">
+        <div class="me2-nick">
+          ${esc(me.nickname)} ${UI.genderBadge(me.gender)}
+          ${me.verify_real ? '<span class="me2-chip blue">已真人认证</span>' : ''}
+          ${me.verify_student ? '<span class="me2-chip">🎓 学生认证</span>' : ''}
         </div>
-        <div class="me-bio">${UI.esc(me.bio || (me.city ? '📍 ' + me.city : '还没写简介，点下方编辑资料'))}</div>
-        <div style="margin-top:6px; display:flex; gap:4px; flex-wrap:wrap;">
-          ${me.mbti ? `<span class="vbadge stu">${UI.esc(me.mbti)}</span>` : ''}
-          ${(me.tags || []).slice(0, 4).map((t) => `<span class="vbadge stu">${UI.esc(t)}</span>`).join('')}
+        <div class="me2-uid">搭搭号：${esc(me.username || '—')} <span class="copy">复制</span></div>
+        <div class="me2-bio">${esc(me.bio || (me.city ? '📍 ' + me.city : '还没写简介，点右上角编辑资料'))}</div>
+        <div class="me2-chips">
+          ${me.mbti ? `<span class="me2-chip">${esc(me.mbti)}</span>` : ''}
+          ${(me.tags || []).slice(0, 4).map((t) => `<span class="me2-chip">${esc(t)}</span>`).join('')}
+          ${me.rating_avg != null ? `<span class="me2-chip">★ 搭后评分 ${me.rating_avg}</span>` : ''}
         </div>
       </div>
-      <button class="navbar-btn" id="btn-edit" style="color:#fff; font-size:13px; background:rgba(255,255,255,0.2); border-radius:10px; width:auto; padding:0 10px; height:30px;">编辑</button>
+    </div>
+    <div class="me2-stats">
+      <div class="me2-stat"><b id="stat-published">${me.post_count}</b><span>发布</span></div>
+      <div class="me2-stat"><b>${me.joined_count || 0}</b><span>参加</span></div>
+      <div class="me2-stat"><b id="stat-likes">—</b><span>获赞</span></div>
     </div>
   </div>
 
-  <div class="me-credit">
+  <div class="me2-credit">
     <div class="credit-ring" style="--p:${pct}; position:relative;"><span>${me.credit}</span></div>
     <div style="flex:1;">
       <div style="font-weight:800; font-size:15px;">搭力值 <span class="pill ${c.cls}">${c.text}</span></div>
@@ -36,13 +60,13 @@ App.register('me', async (el) => {
     <button class="btn ghost sm" id="btn-verify">去认证</button>
   </div>
 
-  <div class="me-stats">
-    <div class="me-stat"><b>${me.post_count}</b><span>发布的局</span></div>
-    <div class="me-stat"><b>${me.joined_count || 0}</b><span>参加的局</span></div>
-    <div class="me-stat"><b>${me.rating_avg ?? '—'}</b><span>搭后评分</span></div>
+  <div class="me2-tabs">
+    <button class="me2-tab active" data-t="published">发布的搭局</button>
+    <button class="me2-tab" data-t="joined">参加的</button>
   </div>
+  <div class="me2-grid" id="me-grid">${UI.loading()}</div>
 
-  <div style="margin:0 14px 14px; border-radius:16px; overflow:hidden; box-shadow:var(--shadow);">
+  <div class="me2-entries">
     <div class="cell" id="c-myposts"><span class="cell-icon">🗂️</span><span class="cell-main">我的搭局</span><span class="cell-arrow">›</span></div>
     <div class="cell" id="c-ratings"><span class="cell-icon">⭐</span><span class="cell-main">收到的评价</span><span class="cell-arrow">›</span></div>
     <div class="cell" id="c-safety"><span class="cell-icon">🛡️</span><span class="cell-main">安全中心</span><span class="cell-arrow">›</span></div>
@@ -50,7 +74,7 @@ App.register('me', async (el) => {
     <div class="cell" id="c-settings"><span class="cell-icon">⚙️</span><span class="cell-main">设置</span><span class="cell-arrow">›</span></div>
   </div>
 
-  <div style="text-align:center; color:var(--text-3); font-size:11.5px; padding-bottom:8px;">搭搭 v1.0 · 轻社交 · 不婚恋 · 有边界</div>`;
+  <div style="text-align:center; color:var(--text-3); font-size:11.5px; padding-bottom:8px;">搭搭 v2.0 · 轻社交 · 不婚恋 · 有边界</div>`;
 
   el.querySelector('#btn-edit').onclick = () => App.navigate('#/edit-profile');
   el.querySelector('#btn-verify').onclick = openVerify;
@@ -59,6 +83,73 @@ App.register('me', async (el) => {
   el.querySelector('#c-safety').onclick = () => App.navigate('#/safety');
   el.querySelector('#c-admin')?.addEventListener('click', () => App.navigate('#/admin'));
   el.querySelector('#c-settings').onclick = () => App.navigate('#/settings');
+
+  // ---------- 内容网格：双 Tab + 三列方形网格 ----------
+  const listBox = el.querySelector('#me-grid');
+  const cache = {};
+  let curTab = 'published';
+
+  function cellHTML(p) {
+    const [st, cls] = statusPill(p);
+    const metaBits = [p.city, p.meet_time].filter(Boolean).map(esc).join(' · ');
+    const likes = p.likes_count || 0;
+    return `
+    <div class="me2-cell" data-id="${p.id}">
+      <div class="me2-cover">
+        <img loading="lazy" src="${esc(coverOf(p))}" alt=""
+          onerror="this.onerror=null;this.src='/img/covers/${esc(p.category)}.svg';">
+        <span class="me2-cover-pill ${cls}">${st}</span>
+      </div>
+      <div class="me2-cell-title">${esc(p.title)}</div>
+      ${metaBits ? `<div class="me2-cell-meta">${metaBits}</div>` : ''}
+      <div class="me2-cell-foot${p.liked ? ' liked' : ''}">
+        <span class="like-ico">${ic('heart', 14) || '❤'}</span><b>${likes}</b>
+        <span style="margin-left:auto;">${p.category_emoji || ''} ${esc(p.category_name || '')}</span>
+      </div>
+    </div>`;
+  }
+
+  async function loadTab(tab) {
+    curTab = tab;
+    el.querySelectorAll('.me2-tab').forEach((b) => b.classList.toggle('active', b.dataset.t === tab));
+    if (cache[tab]) return render(tab);
+    listBox.innerHTML = UI.loading();
+    try {
+      cache[tab] = await API.get(`/my/posts/${tab}`);
+    } catch (err) {
+      listBox.innerHTML = UI.empty('😵', '加载失败', err.message);
+      return;
+    }
+    render(tab);
+    // 获赞数 = 发布内容获赞合计（published 拉取后回填一次）
+    if (tab === 'published') {
+      const total = (cache.published || []).reduce((s, p) => s + (p.likes_count || 0), 0);
+      const el2 = el.querySelector('#stat-likes');
+      if (el2) el2.textContent = total;
+    }
+  }
+
+  function render(tab) {
+    const list = cache[tab] || [];
+    if (!list.length) {
+      listBox.innerHTML = UI.empty(
+        tab === 'published' ? '🗂️' : '🎒',
+        tab === 'published' ? '还没有发布的搭局' : '还没有参加的搭局',
+        tab === 'published' ? '点下方「发布」开一个局，等搭子来找你' : '去广场看看感兴趣的搭局，申请加入吧'
+      );
+      return;
+    }
+    listBox.innerHTML = list.map(cellHTML).join('');
+    listBox.querySelectorAll('[data-id]').forEach((cell) => {
+      cell.onclick = () => App.navigate('#/post/' + cell.dataset.id);
+    });
+  }
+
+  el.querySelectorAll('.me2-tab').forEach((b) => {
+    b.onclick = () => { if (b.dataset.t !== curTab) loadTab(b.dataset.t); };
+  });
+
+  loadTab('published');
 
   function openVerify() {
     const s = UI.sheet('提升信任度', `

@@ -50,11 +50,9 @@ App.register('user', async (el, seg) => {
 
   ${u.recent_done?.length ? `
   <div class="section-title">✅ 搭子履历</div>
-  ${u.recent_done.map((p) => `
-    <div class="card post-card" data-id="${p.id}">
-      <div class="post-main"><div class="post-title">${UI.esc(p.title)}</div>
-      <div style="font-size:12px; color:var(--text-3); margin-top:3px;">${UI.esc(p.meet_time || '')} · 已完成 ✅</div></div>
-    </div>`).join('')}` : ''}
+  <div class="wf" style="padding-top:0;">
+    ${u.recent_done.map((p) => UI.pinCard(p, { history: true })).join('')}
+  </div>` : ''}
 
   ${myId !== u.id ? `
   <div style="padding:6px 14px 20px; display:flex; gap:10px;">
@@ -62,7 +60,7 @@ App.register('user', async (el, seg) => {
     <button class="btn plain sm" id="btn-report" style="flex:1;">🚩 举报</button>
   </div>` : ''}`;
 
-  el.querySelectorAll('[data-id]').forEach((card) => {
+  el.querySelectorAll('.pin-card[data-id]').forEach((card) => {
     card.onclick = () => App.navigate('#/post/' + card.dataset.id);
   });
 

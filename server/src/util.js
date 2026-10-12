@@ -45,6 +45,7 @@ export function publicUser(u) {
   const age = u.birth_year ? new Date().getFullYear() - u.birth_year : null;
   return {
     id: u.id,
+    username: u.username,
     nickname: u.nickname,
     avatar: u.avatar,
     gender: u.gender,

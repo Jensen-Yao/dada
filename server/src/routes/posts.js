@@ -12,6 +12,17 @@ import {
 
 export const postsRouter = Router();
 
+// ---------- 封面/比例字段（BE-02/03 确定性规则，禁随机/时间） ----------
+// aspect：按帖子 id 确定性分档（同帖永远同档）；cover：有配图用首图，否则按 id 奇偶选分类封面变体
+export const ASPECTS = ['3:4', '1:1', '4:3'];
+export function coverFields(p) {
+  const images = safeJSON(p.images, []);
+  return {
+    cover: images[0] || `/img/covers/${p.category}${p.id % 2 ? '-2' : ''}.svg`,
+    aspect: ASPECTS[p.id % 3],
+  };
+}
+
 // ---------- 搭局配图上传 ----------
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UPLOAD_DIR = path.join(__dirname, '..', 'data', 'uploads');
@@ -63,6 +74,7 @@ function postView(p, viewer) {
     gender_req_name: { any: '不限', female: '仅限女生', male: '仅限男生' }[p.gender_req],
     requirements: p.requirements,
     images: safeJSON(p.images, []),
+    ...coverFields(p),
     status: p.status,
     approved_count: approved,
     likes_count: p.likes_count,

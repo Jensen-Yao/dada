@@ -1,12 +1,12 @@
-/* ================= 搭局详情页 ================= */
+/* ================= 搭局详情页（H5-10 大图轮播 + H5-11 底部操作栏） ================= */
 App.register('post', async (el, seg) => {
   const pid = parseInt(seg[0]);
   let post = null;
   let me = API.isLogin() ? await API.get('/auth/me').catch(() => null) : null;
 
-  function metaRow(icon, text) {
-    return `<div style="display:flex; gap:8px; margin-bottom:9px; font-size:14px; color:var(--text-2); align-items:flex-start;">
-      <span style="flex-shrink:0">${icon}</span><span>${UI.esc(text)}</span></div>`;
+  function metaRow(iconSvg, text) {
+    return `<div style="display:flex; gap:8px; margin-bottom:9px; font-size:var(--fs-md); color:var(--text-2); align-items:center;">
+      <span style="flex-shrink:0; display:flex; color:var(--text-3);">${iconSvg}</span><span>${UI.esc(text)}</span></div>`;
   }
 
   function statusPill(p) {
@@ -27,56 +27,43 @@ App.register('post', async (el, seg) => {
   function render() {
     const p = post;
     const c = UI.creditLabel(p.author.credit);
+    el.classList.add('post-page');
+    const imgs = p.images || [];
+    const ar = (UI.aspectOf(p) || '3:4').replace(':', ' / ');
+
+    // H5-10：大图轮播（scroll-snap + n/m 页码指示）；无图降级为分类 emoji 头图块
+    const mediaHTML = imgs.length ? `
+    <div style="position:relative;">
+      <div class="carousel" id="carousel" style="--ar:${ar}">
+        ${imgs.map((src, i) => `<img src="${UI.esc(src)}" ${i ? 'loading="lazy"' : ''} alt="">`).join('')}
+      </div>
+      <span class="carousel-ind" id="car-ind">1/${imgs.length}</span>
+    </div>` : `
+    <div class="detail-hero" style="--ar:${ar}">${p.category_emoji}</div>`;
+
     el.innerHTML = `
     <div class="navbar">
       <div class="navbar-inner">
-        <button class="navbar-btn" onclick="history.back()">‹</button>
+        <button class="navbar-btn" onclick="history.back()">${UI.icon('chevron-left', 22)}</button>
         <div class="navbar-title">${UI.esc(p.category_name)}搭局</div>
-        <button class="navbar-btn" id="btn-share">⤴</button>
+        <button class="navbar-btn" id="btn-share">${UI.icon('share', 19)}</button>
       </div>
     </div>
 
-    <div class="card" style="margin:14px;">
-      <div style="display:flex; gap:12px; align-items:flex-start;">
-        <div class="post-emoji" style="width:58px; height:58px; font-size:30px;">${p.category_emoji}</div>
-        <div style="flex:1; min-width:0;">
-          <div style="font-size:18px; font-weight:800; line-height:1.4;">${UI.esc(p.title)}</div>
-          <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap;">${statusPill(p)}<span class="pill">${UI.esc(p.fee_mode_name)}</span>${p.gender_req !== 'any' ? `<span class="pill blue">${p.gender_req === 'female' ? '♀ 仅限女生' : '♂ 仅限男生'}</span>` : ''}</div>
-        </div>
-      </div>
-      ${p.images?.length ? `
-      <div class="gallery" style="margin-top:12px; padding:0;">
-        ${p.images.map((src) => `<img src="${UI.esc(src)}" loading="lazy" alt="">`).join('')}
-      </div>` : ''}
-      ${p.content ? `<div style="margin-top:12px; font-size:14.5px; line-height:1.7; color:var(--text); white-space:pre-wrap;">${UI.esc(p.content)}</div>` : ''}
+    ${mediaHTML}
+
+    <!-- 内容卡：标题 + pill 标签 + 正文 + 信息行（标题下移至轮播下方，XHS 式） -->
+    <div class="card" style="margin:12px 14px;">
+      <div style="font-size:var(--fs-title); font-weight:800; line-height:1.45;">${UI.esc(p.title)}</div>
+      <div style="margin-top:8px; display:flex; gap:6px; flex-wrap:wrap;">${statusPill(p)}<span class="pill">${UI.esc(p.fee_mode_name)}</span>${p.gender_req !== 'any' ? `<span class="pill blue">${p.gender_req === 'female' ? '♀ 仅限女生' : '♂ 仅限男生'}</span>` : ''}</div>
+      ${p.content ? `<div style="margin-top:12px; font-size:var(--fs-md); line-height:1.7; color:var(--text); white-space:pre-wrap;">${UI.esc(p.content)}</div>` : ''}
       <div style="margin-top:14px; padding-top:12px; border-top:0.5px solid var(--line);">
-        ${metaRow('📍', `${UI.esc(p.city)}${p.location_name ? ' · ' + UI.esc(p.location_name) : ''}`)}
-        ${p.meet_time ? metaRow('🕐', UI.esc(p.meet_time)) : ''}
-        ${metaRow('👥', `已通过 ${p.approved_count} / ${p.need_count} 人${p.status === 'open' ? `，还缺 ${Math.max(0, p.need_count - p.approved_count)} 人` : ''}`)}
-        ${p.requirements ? metaRow('📝', UI.esc(p.requirements)) : ''}
-        ${metaRow('👀', `${p.views_count} 次浏览 · ${UI.timeAgo(p.created_at)}发布`)}
+        ${metaRow(UI.icon('location', 15), `${UI.esc(p.city)}${p.location_name ? ' · ' + UI.esc(p.location_name) : ''}`)}
+        ${p.meet_time ? metaRow(UI.icon('clock', 15), UI.esc(p.meet_time)) : ''}
+        ${metaRow(UI.icon('people', 15), `已通过 ${p.approved_count} / ${p.need_count} 人${p.status === 'open' ? `，还缺 ${Math.max(0, p.need_count - p.approved_count)} 人` : ''}`)}
+        ${p.requirements ? metaRow(UI.icon('edit', 15), UI.esc(p.requirements)) : ''}
+        ${metaRow(UI.icon('eye', 15), `${p.views_count} 次浏览 · ${UI.timeAgo(p.created_at)}发布`)}
       </div>
-      <div style="display:flex; gap:10px; margin-top:14px;">
-        <button class="btn plain sm" id="btn-like" style="flex:1;">${p.liked ? '❤️ 已赞' : '🤍 想去'} ${p.likes_count}</button>
-        <button class="btn primary sm" id="btn-join" style="flex:2;">${joinBtnText()}</button>
-      </div>
-    </div>
-
-    <!-- 作者卡片 -->
-    <div class="card" style="margin:0 14px 12px; display:flex; align-items:center; gap:12px;" id="author-card">
-      ${UI.avatarHTML(p.author, 'lg')}
-      <div style="flex:1; min-width:0;">
-        <div style="font-weight:700; font-size:15.5px; display:flex; align-items:center; gap:6px;">
-          ${UI.esc(p.author.nickname)} ${UI.genderBadge(p.author.gender)}
-          ${p.author.verify_real ? '<span class="vbadge real">已真人认证</span>' : ''}
-          ${p.author.verify_student ? '<span class="vbadge real">🎓 学生</span>' : ''}
-        </div>
-        <div style="font-size:12.5px; color:var(--text-3); margin-top:2px;">
-          ${UI.esc(p.author.school || p.author.occupation || '搭友')} · ${p.author.age ? p.author.age + '岁 · ' : ''}${UI.esc(p.author.city)}
-        </div>
-        <div style="margin-top:4px;"><span class="pill ${c.cls}">${c.text}</span>${p.author.rating_avg ? `<span class="pill gray">⭐ ${p.author.rating_avg}</span>` : ''}</div>
-      </div>
-      <span class="cell-arrow">›</span>
     </div>
 
     <!-- 组局者：申请管理 / 完成搭局 -->
@@ -92,7 +79,7 @@ App.register('post', async (el, seg) => {
     <div class="card" style="margin:0 14px 12px;" id="rate-panel">${UI.loading()}</div>` : ''}
 
     <!-- 评论区 -->
-    <div class="section-title">💬 评论区（${p.comments_count}）</div>
+    <div class="section-title" id="comments-anchor">💬 评论区（${p.comments_count}）</div>
     <div id="comments">${UI.loading()}</div>
     ${API.isLogin() ? `
     <div style="padding:0 14px 20px;">
@@ -101,12 +88,47 @@ App.register('post', async (el, seg) => {
         <button class="btn primary sm" id="btn-comment">发送</button>
       </div>
     </div>` : ''}
+
+    <!-- H5-11：底部固定操作栏（作者｜点赞｜评论｜主按钮） -->
+    <div class="detail-actionbar detail-bar">
+      <div class="da-author" id="author-card">
+        ${UI.avatarHTML(p.author)}
+        <div class="da-author-info">
+          <span class="da-name">${UI.esc(p.author.nickname)} ${UI.genderBadge(p.author.gender)}${p.author.verify_real ? '<span class="vbadge real">真人</span>' : ''}</span>
+          <span class="pill ${c.cls} da-credit" style="align-self:flex-start;">${c.text}</span>
+        </div>
+      </div>
+      <button class="da-act ${p.liked ? 'liked' : ''}" id="btn-like">
+        ${UI.icon(p.liked ? 'heartFill' : 'heart', 22)}<span>${p.likes_count}</span>
+      </button>
+      <button class="da-act" id="btn-comment-jump">
+        ${UI.icon('comment', 22)}<span>${p.comments_count}</span>
+      </button>
+      <button class="btn primary sm da-cta" id="btn-join" ${joinDisabled() ? 'disabled' : ''}>${joinBtnText()}</button>
+    </div>
     `;
 
     bind(p);
+    bindCarousel(imgs);
     if (p.is_author && ['open', 'full'].includes(p.status)) loadJoins(p);
     if (p.is_author && p.status === 'done') loadRatePanel(p);
     loadComments(p);
+  }
+
+  // 轮播页码指示：scroll + rAF 节流（H5-10）
+  function bindCarousel(imgs) {
+    const car = el.querySelector('#carousel');
+    const ind = el.querySelector('#car-ind');
+    if (!car || !ind || !imgs.length) return;
+    let raf = 0;
+    car.addEventListener('scroll', () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        const idx = Math.round(car.scrollLeft / car.clientWidth) + 1;
+        ind.textContent = `${Math.min(imgs.length, Math.max(1, idx))}/${imgs.length}`;
+      });
+    }, { passive: true });
   }
 
   function joinBtnText() {
@@ -118,6 +140,16 @@ App.register('post', async (el, seg) => {
     if (p.my_join === 'approved') return '✅ 已通过，去聊天';
     if (p.my_join === 'rejected') return '重新申请';
     return '申请加入';
+  }
+
+  // 主按钮不可操作态（组局者视角/非招募中/已申请）→ 置灰
+  function joinDisabled() {
+    const p = post;
+    if (!API.isLogin()) return false;
+    if (p.is_author) return true;
+    if (p.status !== 'open') return true;
+    if (p.my_join === 'pending') return true;
+    return false;
   }
 
   function bind(p) {
@@ -138,6 +170,11 @@ App.register('post', async (el, seg) => {
         render();
       } catch (err) { UI.toast(err.message); }
     };
+    // 评论按钮：滚动到评论区并聚焦输入框
+    el.querySelector('#btn-comment-jump').onclick = () => {
+      el.querySelector('#comments-anchor')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setTimeout(() => el.querySelector('#f-comment')?.focus(), 380);
+    };
     el.querySelector('#btn-join').onclick = onJoin;
     el.querySelector('#btn-comment')?.addEventListener('click', onComment);
     el.querySelector('#f-comment')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') onComment(); });
@@ -157,6 +194,7 @@ App.register('post', async (el, seg) => {
     const p = post;
     if (p.is_author || p.status !== 'open') return;
     if (p.my_join === 'pending') return;
+    if (p.my_join === 'approved') { App.navigate('#/chat'); return; }
     const s = UI.sheet('申请加入「' + UI.esc(p.title.slice(0, 20)) + '」', `
       <textarea id="f-msg" class="textarea" placeholder="和组局者打个招呼吧：为什么想加入、你能满足什么要求…（选填）"></textarea>
       <button class="btn primary block" id="btn-go" style="margin-top:12px;">提交申请</button>`);

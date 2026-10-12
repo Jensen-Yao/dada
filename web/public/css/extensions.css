@@ -1,0 +1,452 @@
+/* ============================================================
+   搭搭 extensions.css —— FE-B 个人线增量样式（v2 改版）
+   作用范围：我的页新版 / 发布页 / 聊天会话 / 登录页 / PWA 安装横幅
+   约定：只用新类名（xx2- / 页面挂接类）或对既有类名做覆盖，
+        不修改 app.css；桌面媒体查询一律放 desktop.css（WEB-06 红线）。
+   ============================================================ */
+
+/* ---------- 设计 Token 补充（H5-01~03，新增不改旧） ---------- */
+:root {
+  --like: #FF2442;
+  --like-soft: #FFEEF0;
+  --grad-primary: linear-gradient(135deg, #FF7A45, #FF9A62);
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-xl: 24px;
+  --fs-xs: 11px;
+  --fs-sm: 12.5px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-display: 26px;
+  --shadow-soft: 0 1px 8px rgba(34, 36, 38, 0.05);
+}
+
+/* ============================================================
+   1. 我的页新版（H5-12/13，对标小红书个人主页）
+   ============================================================ */
+
+/* 头部：橙色渐变背景 + 大头像 + 搭搭号 + 三栏数据 */
+.me2-hero {
+  position: relative;
+  background: linear-gradient(165deg, #FF7A45 0%, #FF9A62 52%, #FFC09A 100%);
+  color: #fff;
+  padding: calc(14px + env(safe-area-inset-top, 0px)) 16px 20px;
+  border-radius: 0 0 28px 28px;
+  overflow: hidden;
+}
+.me2-hero::before {
+  content: '';
+  position: absolute;
+  right: -46px;
+  top: -58px;
+  width: 190px;
+  height: 190px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.14);
+  pointer-events: none;
+}
+.me2-hero::after {
+  content: '';
+  position: absolute;
+  left: -34px;
+  bottom: -70px;
+  width: 150px;
+  height: 150px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.10);
+  pointer-events: none;
+}
+.me2-toprow {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.me2-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #fff;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.22);
+  border-radius: 99px;
+  padding: 5px 12px;
+  backdrop-filter: blur(6px);
+}
+.me2-edit:active { background: rgba(255, 255, 255, 0.34); }
+.me2-user {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.me2-avatar {
+  width: 78px;
+  height: 78px;
+  border-radius: 50%;
+  border: 2.5px solid rgba(255, 255, 255, 0.85);
+  box-shadow: 0 4px 16px rgba(180, 60, 0, 0.22);
+  flex-shrink: 0;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.35);
+}
+.me2-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.me2-avatar .avatar { width: 100%; height: 100%; border-radius: 50%; font-size: 30px; }
+.me2-usermain { flex: 1; min-width: 0; }
+.me2-nick {
+  font-size: 21px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  line-height: 1.3;
+}
+.me2-uid {
+  margin-top: 3px;
+  font-size: var(--fs-xs);
+  opacity: 0.88;
+  letter-spacing: 0.2px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.me2-uid .copy { opacity: 0.7; font-size: 10px; }
+.me2-bio {
+  margin-top: 5px;
+  font-size: 13px;
+  opacity: 0.94;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.me2-chips { margin-top: 7px; display: flex; gap: 5px; flex-wrap: wrap; }
+.me2-chip {
+  font-size: 10.5px;
+  padding: 2px 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.24);
+  font-weight: 600;
+}
+.me2-chip.blue { background: rgba(255, 255, 255, 0.9); color: #3B82F6; }
+
+/* 三栏数据（发布 / 参加 / 获赞） */
+.me2-stats {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  margin-top: 16px;
+  padding: 0 6px;
+}
+.me2-stat {
+  flex: 1;
+  text-align: center;
+  border-right: 0.5px solid rgba(255, 255, 255, 0.3);
+}
+.me2-stat:last-child { border-right: none; }
+.me2-stat b { font-size: 19px; font-weight: 800; display: block; font-variant-numeric: tabular-nums; }
+.me2-stat span { font-size: var(--fs-xs); opacity: 0.88; }
+
+/* 搭力值卡（保留原功能，统一新 Token） */
+.me2-credit {
+  margin: 14px 14px -10px;
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card, var(--shadow));
+  padding: 13px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.me2-credit .credit-ring { position: relative; }
+
+/* 内容区 Tab（发布的搭局 / 参加的） */
+.me2-tabs {
+  display: flex;
+  margin: 20px 14px 0;
+  gap: 22px;
+  border-bottom: 0.5px solid var(--line);
+  padding: 0 4px;
+}
+.me2-tab {
+  position: relative;
+  padding: 10px 2px 9px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-3);
+}
+.me2-tab.active { color: var(--text); font-weight: 800; }
+.me2-tab::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -1px;
+  width: 0;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--primary);
+  transform: translateX(-50%);
+  transition: width 0.18s ease;
+}
+.me2-tab.active::after { width: 26px; }
+
+/* 三列方形封面网格（H5-13：统一 1:1 比例，桌面列数见 desktop.css） */
+.me2-grid { padding: 12px 10px 4px; display: block; font-size: 0; /* 消除 inline-block 空白节点导致的换列 */ }
+.me2-cell {
+  display: inline-block;
+  width: calc(33.333% - 6px);
+  margin: 0 3px 14px;
+  break-inside: avoid;
+  vertical-align: top;
+  font-size: var(--fs-base, 15px);
+}
+.me2-cover {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--line);
+  box-shadow: var(--shadow-soft);
+}
+.me2-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.me2-cover .cover-fallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 34px;
+  background: linear-gradient(135deg, #FFF4EC, #FFE3D2);
+}
+.me2-cover-pill {
+  position: absolute;
+  top: 7px;
+  left: 7px;
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--text-2);
+  font-weight: 700;
+  backdrop-filter: blur(4px);
+}
+.me2-cover-pill.green { color: var(--success); }
+.me2-cover-pill.blue { color: #3B82F6; }
+.me2-cover-pill.yellow { color: #B54708; }
+.me2-cover-pill.gray { color: var(--text-3); }
+.me2-cell-title {
+  margin-top: 7px;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.me2-cell-meta {
+  margin-top: 3px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.me2-cell-foot {
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+}
+.me2-cell-foot .like-ico { width: 14px; height: 14px; display: inline-flex; color: var(--text-3); }
+.me2-cell-foot .like-ico svg { width: 100%; height: 100%; }
+.me2-cell-foot.liked { color: var(--like); }
+.me2-cell-foot.liked .like-ico { color: var(--like); }
+.me2-cell-foot b { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* 入口 cell 列表（保留全部原入口） */
+.me2-entries {
+  margin: 10px 14px 12px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow-card, var(--shadow));
+}
+
+/* ============================================================
+   2. 发布页（H5-14 一致性挂接）
+   ============================================================ */
+.pub-tip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background: var(--card);
+  box-shadow: var(--shadow-soft);
+}
+.pub-tip .pub-tip-emoji { font-size: 22px; flex-shrink: 0; }
+.pub-tip .pub-tip-text { font-size: var(--fs-sm); color: var(--text-2); line-height: 1.55; }
+.pub-counter {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--card);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  box-shadow: var(--shadow-soft);
+}
+.pub-counter .pub-cnt-val { font-size: 18px; flex: 1; text-align: center; font-weight: 800; }
+.pub-female-tip {
+  margin-top: 8px;
+  background: var(--safe);
+  color: var(--success);
+  font-size: var(--fs-sm);
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+}
+.pub-cta { margin-top: 6px; }
+.pub-foot-note {
+  text-align: center;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  padding-bottom: 10px;
+}
+
+/* ============================================================
+   3. 聊天会话页（H5-15 一致性 + 桌面分栏挂接）
+   ============================================================ */
+
+/* 发送按钮换 send 图标的通用容器（图标由 JS 注入，这里只管外观） */
+.chat-send-btn {
+  border-radius: 20px;
+  padding: 10px 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+.chat-send-btn svg { width: 17px; height: 17px; }
+
+/* 桌面分栏结构（.conv-split 由 conv.js / chat.js 在 ≥768px 时挂上，
+   移动端下面板默认隐藏，展示规则全部在 desktop.css） */
+.conv-list-pane { display: none; }
+.conv-list-head {
+  height: 50px;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  font-size: 17px;
+  font-weight: 800;
+  border-bottom: 0.5px solid var(--line);
+  background: rgba(255, 255, 255, 0.92);
+  flex-shrink: 0;
+}
+.conv-list-scroll { flex: 1; overflow-y: auto; }
+.conv-list-scroll .conv-item.active { background: var(--primary-soft); }
+.conv-list-scroll .conv-item.active .conv-name { color: var(--primary-deep); }
+.conv-empty-pane { display: none; }
+
+/* ============================================================
+   4. 登录页现代化（H5-16）
+   ============================================================ */
+.login-hero2 { text-align: center; padding: 8dvh 30px 28px; position: relative; }
+.login-logo2 {
+  width: 92px;
+  height: 92px;
+  margin: 0 auto;
+  border-radius: 26px;
+  background: var(--grad-primary);
+  box-shadow: 0 10px 28px rgba(255, 122, 69, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 46px;
+  color: #fff;
+  overflow: hidden;
+}
+.login-logo2 img { width: 100%; height: 100%; object-fit: cover; }
+.login-title2 { font-size: var(--fs-display); font-weight: 800; margin-top: 14px; letter-spacing: 1px; }
+.login-slogan2 { color: var(--text-2); font-size: 14px; margin-top: 6px; line-height: 1.6; }
+.login-form2 { padding: 0 26px; display: flex; flex-direction: column; gap: 12px; }
+.login-demo2 {
+  text-align: center;
+  margin-top: 16px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+}
+
+/* ============================================================
+   5. PWA 安装横幅（APP-03，DOM 由 app.js 注入）
+   ============================================================ */
+#pwa-banner {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: calc(var(--tabbar-h) + var(--safe-bottom) + 12px);
+  z-index: 90;
+  display: none;
+  align-items: center;
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.97);
+  backdrop-filter: blur(16px);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-pop);
+  padding: 12px 14px;
+  animation: pwaUp 0.3s ease;
+}
+#pwa-banner.show { display: flex; }
+#pwa-banner.low { bottom: calc(var(--safe-bottom) + 14px); }
+@keyframes pwaUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: none; }
+}
+.pwa-banner-logo {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--grad-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 22px;
+  flex-shrink: 0;
+}
+.pwa-banner-main { flex: 1; min-width: 0; }
+.pwa-banner-title { font-size: 14px; font-weight: 700; }
+.pwa-banner-sub { font-size: var(--fs-xs); color: var(--text-3); margin-top: 1px; }
+.pwa-banner-btn {
+  background: var(--grad-primary);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 8px 16px;
+  border-radius: 99px;
+  flex-shrink: 0;
+  box-shadow: 0 4px 12px rgba(255, 122, 69, 0.35);
+}
+.pwa-banner-btn:active { transform: scale(0.96); }
+.pwa-banner-close {
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-3);
+  font-size: 14px;
+  flex-shrink: 0;
+}

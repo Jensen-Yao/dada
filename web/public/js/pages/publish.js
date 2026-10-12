@@ -19,9 +19,9 @@ App.register('publish', async (el) => {
   </div>
 
   <div style="padding:14px 14px 6px;">
-    <div class="card" style="display:flex; align-items:center; gap:10px; padding:12px 14px;">
-      <span style="font-size:22px;">💡</span>
-      <div style="font-size:12.5px; color:var(--text-2); line-height:1.5;">
+    <div class="card pub-tip">
+      <span class="pub-tip-emoji">💡</span>
+      <div class="pub-tip-text">
         写清楚<b>时间、地点、人数和要求</b>，能大幅提高成搭率。禁止引流站外与任何违规内容。
       </div>
     </div>
@@ -63,9 +63,9 @@ App.register('publish', async (el) => {
 
     <div class="form-item">
       <label>还找几个人</label>
-      <div style="display:flex; align-items:center; gap:14px; background:var(--card); border-radius:14px; padding:10px 14px; box-shadow:var(--shadow);">
+      <div class="pub-counter">
         <button class="btn plain sm" id="cnt-minus" style="width:40px;">−</button>
-        <b id="cnt-val" style="font-size:18px; flex:1; text-align:center;">1</b>
+        <b id="cnt-val" class="pub-cnt-val">1</b>
         <button class="btn plain sm" id="cnt-plus" style="width:40px;">＋</button>
       </div>
     </div>
@@ -82,7 +82,7 @@ App.register('publish', async (el) => {
       <div class="seg" id="gender-seg">
         ${meta.gender_reqs.map((g) => `<button data-g="${g.key}">${g.name}</button>`).join('')}
       </div>
-      <div id="female-tip" class="hidden" style="margin-top:8px; background:var(--safe); color:var(--success); font-size:12.5px; padding:8px 12px; border-radius:10px;">
+      <div id="female-tip" class="pub-female-tip hidden">
         ♀ 女生专属局已开启：仅女生可以申请，聊天与见面更安心
       </div>
     </div>
@@ -100,8 +100,8 @@ App.register('publish', async (el) => {
       <input id="f-req" class="input" maxlength="100" placeholder="如：能吃辣、不迟到、有基础">
     </div>
 
-    <button class="btn primary block" id="btn-publish" style="margin-top:6px;">🚀 发布搭局</button>
-    <div style="text-align:center; font-size:11.5px; color:var(--text-3); padding-bottom:10px;">
+    <button class="btn primary block pub-cta" id="btn-publish">🚀 发布搭局</button>
+    <div class="pub-foot-note">
       发布需搭力值 ≥ 300 · 你当前 ${me?.credit ?? '—'} 分
     </div>
   </div>`;

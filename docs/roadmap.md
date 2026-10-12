@@ -42,3 +42,11 @@
 - [ ] SQLite → PostgreSQL 迁移预案（用户量 >10万时）
 - [ ] 图片上传接入对象存储（当前本地磁盘）
 - [ ] API 限流（防刷）
+
+## v2.1 候选项（PM验收第2轮产出，2026-10）
+
+- [ ] SW预缓存补齐 /js/pages/*.js（弱网首次安装离线白屏问题）
+- [ ] 断点跨越刷新前用sessionStorage保存聊天草稿并回填
+- [ ] start.sh增加Capacitor打包前置检查（server.url仍为占位域名时告警）
+- [ ] 轮播组件无障碍：图片alt、页码aria-live、键盘左右键
+- [ ] ic()图标助手收敛到ui.js统一契约（消除conv/chat重复定义）

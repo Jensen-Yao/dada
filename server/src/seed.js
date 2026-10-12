@@ -47,14 +47,22 @@ const posts = [
 ];
 
 const pidByIndex = [];
-for (const [username, category, title, content, city, loc, meet, need, fee, greq, req] of posts) {
+// 演示多图帖：按 title 注入多张封面（其余帖子维持奇偶交替单图逻辑）
+const DEMO_MULTI_IMAGES = {
+  '周六中午五道口吃日料放题，缺一个饭搭子': ['/img/covers/food.svg', '/img/covers/food-2.svg', '/img/covers/coffee.svg'],
+  '剧本杀拼车，周六下午情感本': ['/img/covers/boardgame.svg', '/img/covers/boardgame-2.svg'],
+};
+for (const [i, [username, category, title, content, city, loc, meet, need, fee, greq, req]] of posts.entries()) {
   const exist = db.prepare('SELECT id FROM posts WHERE title = ?').get(title);
   if (exist) { pidByIndex.push(exist.id); continue; }
+  // 封面按帖子序号奇偶交替两种配色变体（第1、3、5…条用 {key}.svg，第2、4、6…条用 {key}-2.svg）
+  const cover = `/img/covers/${category}${i % 2 ? '-2' : ''}.svg`;
+  const images = DEMO_MULTI_IMAGES[title] || [cover];
   const info = db.prepare(`
     INSERT INTO posts (user_id, category, title, content, city, location_name, meet_time, need_count, fee_mode, gender_req, requirements, images, status, likes_count, views_count, created_at)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'open',?,?,?)
   `).run(uidByUsername[username], category, title, content, city, loc, meet, need, fee, greq, req,
-    JSON.stringify([`/img/covers/${category}.svg`]),
+    JSON.stringify(images),
     Math.floor(Math.random() * 20), 50 + Math.floor(Math.random() * 500), t - Math.floor(Math.random() * 7 * 86400000));
   pidByIndex.push(Number(info.lastInsertRowid));
 }
@@ -73,6 +81,44 @@ for (const [username, idx, text] of sampleComments) {
   if (!pid || db.prepare('SELECT 1 FROM comments WHERE post_id = ? AND user_id = ? AND content = ?').get(pid, uidByUsername[username], text)) continue;
   db.prepare('INSERT INTO comments (post_id, user_id, content, created_at) VALUES (?,?,?,?)').run(pid, uidByUsername[username], text, t - Math.floor(Math.random() * 3 * 86400000));
   db.prepare('UPDATE posts SET comments_count = comments_count + 1 WHERE id = ?').run(pid);
+}
+
+// ---------- 演示会话：xiaoyu 与 meimei 围绕日料帖的邀约对话 ----------
+{
+  const xiaoyuId = uidByUsername.xiaoyu;
+  const meimeiId = uidByUsername.meimei;
+  const [ua, ub] = xiaoyuId < meimeiId ? [xiaoyuId, meimeiId] : [meimeiId, xiaoyuId];
+  let conv = db.prepare('SELECT * FROM conversations WHERE user_a = ? AND user_b = ?').get(ua, ub);
+  if (!conv) {
+    const info = db.prepare('INSERT INTO conversations (post_id, user_a, user_b, last_msg_at, created_at) VALUES (?,?,?,?,?)')
+      .run(pidByIndex[0], ua, ub, t, t);
+    conv = { id: Number(info.lastInsertRowid) };
+  }
+  const hasMsg = db.prepare('SELECT 1 FROM messages WHERE conv_id = ? LIMIT 1').get(conv.id);
+  if (!hasMsg) {
+    // 时间基准：从种子时间往前推 7 分钟，随后按对话顺序每条递增 1 分钟
+    let ts = t - 7 * 60000;
+    const dialog = [
+      [meimeiId, '你好呀！刷到你的日料放题帖，还缺饭搭子吗？我三文鱼能吃一打 🍣'],
+      [xiaoyuId, '缺缺缺！就等一个能吃的搭子，一个人吃放题实在太尴尬了'],
+      [meimeiId, '那可太好了，我饭量你放心，绝不冷场，微辣也完全 OK'],
+      [xiaoyuId, '周六 11:25 店门口碰头怎么样？吃完还能去旁边的书店逛逛'],
+      [meimeiId, '没问题，周六我准时到！到时候你穿什么，我认一下人'],
+      [xiaoyuId, '我背绿色双肩包，头像就是本人～期待周六一起干饭！'],
+    ];
+    dialog.forEach(([senderId, text], idx) => {
+      ts += 60000;
+      db.prepare('INSERT INTO messages (conv_id, sender_id, type, content, created_at) VALUES (?,?,?,?,?)')
+        .run(conv.id, senderId, 'text', text, ts);
+      // 模拟 handleChatMessage 行为：首条消息后插入一条安全提示
+      if (idx === 0) {
+        db.prepare('INSERT INTO messages (conv_id, sender_id, type, content, created_at) VALUES (?,?,?,?,?)')
+          .run(conv.id, senderId, 'safety', '⚠️ 安全提示：请勿脱离平台交易或转账，谨防诈骗。首次见面建议选择人多的公共场所。', ts);
+      }
+    });
+    db.prepare('UPDATE conversations SET last_msg_at = ? WHERE id = ?').run(ts, conv.id);
+    console.log('   演示会话已写入：xiaoyu ↔ meimei（日料帖，6 条消息 + 1 条安全提示）');
+  }
 }
 
 console.log(`✅ 完成：${Object.keys(uidByUsername).length} 个用户，${pidByIndex.length} 条搭局`);

@@ -64,6 +64,7 @@ test('注册+登录流程', async () => {
   assert.equal(r.status, 200);
   tokenA = r.json.data.token;
   userIdA = r.json.data.user.id;
+  assert.equal(r.json.data.user.username, 'tester_a');
   const r2 = await api('POST', '/api/auth/register', { username: 'tester_b', password: '123456', nickname: '测试乙', gender: 'male', city: '北京' });
   tokenB = r2.json.data.token;
   userIdB = r2.json.data.user.id;

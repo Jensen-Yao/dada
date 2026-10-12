@@ -1,0 +1,14 @@
+{
+  "appId": "com.dada.app",
+  "appName": "搭搭",
+  "webDir": "web/public",
+  "//note": "本地演示请改为 http://<局域网IP>:3000",
+  "server": {
+    "url": "https://dada.example.com",
+    "androidScheme": "https",
+    "cleartext": true
+  },
+  "android": {
+    "backgroundColor": "#F6F7F9"
+  }
+}

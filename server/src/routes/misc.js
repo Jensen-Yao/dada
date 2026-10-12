@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { db, now } from '../db.js';
 import { requireAuth, optionalAuth, ok, safeJSON, CATEGORIES, CATEGORY_MAP, FEE_MODES, GENDER_REQS, RATE_TAGS } from '../util.js';
-import { myPostsRouter, postsRouter } from './posts.js';
+import { myPostsRouter, postsRouter, coverFields } from './posts.js';
 import { reportRouter } from './users.js';
 
 export const miscRouter = Router();
@@ -60,6 +60,7 @@ miscRouter.get('/recommend', optionalAuth, (req, res) => {
       author: { id: author.id, nickname: author.nickname, avatar: author.avatar, gender: author.gender, credit: author.credit },
       likes_count: p.likes_count, liked,
       images: safeJSON(p.images, []),
+      ...coverFields(p),
       reason: `${CATEGORY_MAP[p.category]?.name || '搭子'} · ${p.city}`,
     };
   });
@@ -96,6 +97,7 @@ miscRouter.get('/for-you', requireAuth, (req, res) => {
       category_name: CATEGORY_MAP[p.category]?.name, category_emoji: CATEGORY_MAP[p.category]?.emoji,
       city: p.city, meet_time: p.meet_time,
       images: safeJSON(p.images, []),
+      ...coverFields(p),
       author: { id: author.id, nickname: author.nickname, avatar: author.avatar },
       tag_overlap: tagOverlap,
       reason: tagOverlap.length ? `你们都爱「${tagOverlap[0]}」` : `${CATEGORY_MAP[p.category]?.name} · 可能合拍`,

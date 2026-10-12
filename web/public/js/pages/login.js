@@ -5,12 +5,12 @@ App.register('login', async (el) => {
 
   function html() {
     return `
-    <div class="login-hero">
-      <div class="logo">🤝</div>
-      <h1>搭搭</h1>
-      <p>万物皆可搭，找人别犯难<br>饭搭 · 学习搭 · 运动搭 · 旅行搭…</p>
+    <div class="login-hero2">
+      <div class="login-logo2"><img src="/img/logo.svg" alt="搭搭" onerror="this.remove();this.parentNode.textContent='🤝';"></div>
+      <h1 class="login-title2">搭搭</h1>
+      <p class="login-slogan2">万物皆可搭，找人别犯难<br>饭搭 · 学习搭 · 运动搭 · 旅行搭…</p>
     </div>
-    <div style="padding: 0 26px; display:flex; flex-direction:column; gap:12px;">
+    <div class="login-form2">
       <div class="form-item">
         <div class="input" style="display:flex; gap:8px; padding:0;">
           <input id="f-user" placeholder="用户名" style="flex:1; padding:12px 14px; background:none; border-radius:14px;">
@@ -37,7 +37,7 @@ App.register('login', async (el) => {
         </button>
       </div>
       <button id="btn-visit" style="text-align:center; color: var(--text-3); font-size: 13px; margin-top:2px;">先随便逛逛 👀</button>
-      <div style="text-align:center; margin-top:16px; color: var(--text-3); font-size: 11.5px; line-height:1.7;">
+      <div class="login-demo2">
         演示账号：xiaoyu / 123456（已认证用户）<br>管理员：admin / 123456（运营后台）
       </div>
     </div>`;

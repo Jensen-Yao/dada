@@ -1,0 +1,179 @@
+/* ============================================================
+   搭搭 desktop.css —— 桌面网页端（WEB-01 ~ WEB-06）
+   红线：本项目所有 min-width 媒体查询只允许出现在本文件；
+        <768px 移动端零回归（本文件不影响任何移动端样式）。
+   依赖：app.js 在路由渲染时设置 body[data-page]；
+        conv.js / chat.js 在 ≥768px 渲染时给页面容器挂 .conv-split / .chat-split。
+   ============================================================ */
+
+/* ---------- WEB-01 断点与全局布局：TabBar → 左侧栏 ---------- */
+@media (min-width: 768px) {
+  #app { flex-direction: row; }
+
+  #tabbar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: 72px;
+    flex-direction: column;
+    padding: 12px 0 calc(12px + var(--safe-bottom));
+    border-top: none;
+    border-right: 0.5px solid var(--line);
+    background: rgba(255, 255, 255, 0.96);
+  }
+  .tab { flex: none; height: 52px; gap: 3px; }
+  .tab-publish { margin: 8px 12px; flex: none; height: auto; }
+  .tab-publish .tab-label { display: none; }
+  .badge { top: 4px; right: auto; left: 40px; }
+
+  #page-container { margin-left: 72px; }
+  .page { padding-bottom: 24px; } /* 左侧栏布局下不再给底部 TabBar 让位 */
+  .conv-split, .chat-split { padding-bottom: 0; } /* 分栏页内部自管滚动，不留底部空隙 */
+
+  /* 桌面端侧边导航常驻（覆盖移动端"非 Tab 页隐藏 TabBar"的行为），
+     避免详情/会话等页面出现空白左条；登录页除外 */
+  #tabbar.hidden { display: flex !important; }
+  body[data-page="login"] #tabbar.hidden,
+  body[data-page=""] #tabbar.hidden { display: none !important; }
+
+  /* 桌面 Toast 位置微调，避开左侧栏 */
+  #toast-wrap { left: 72px; }
+
+  /* 广场/发现：多列瀑布流 + 容器居中限宽（WEB-02） */
+  .wf { column-count: 3; column-gap: 10px; max-width: 1024px; margin: 0 auto; }
+  .wf-item { margin-bottom: 10px; }
+
+  /* WEB-03 聊天左右分栏：左 320px 会话列表 + 右聊天区 */
+  .conv-split {
+    display: flex;
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg);
+  }
+  .conv-split > .conv-list-pane {
+    display: flex;
+    flex-direction: column;
+    width: 320px;
+    flex: none;
+    background: var(--card);
+    border-right: 0.5px solid var(--line);
+  }
+  .conv-split > .conv-list-pane .conv-item.active { background: var(--primary-soft); }
+  .conv-split > .conv-chat-pane {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background: var(--bg);
+  }
+  .conv-split .chat-scroll { max-width: 860px; width: 100%; margin: 0 auto; flex: 1; }
+  .conv-split .chat-input-bar { max-width: 860px; width: 100%; margin: 0 auto; }
+  .conv-split .navbar { background: rgba(255, 255, 255, 0.96); }
+
+  /* 消息列表页（#/chat）桌面：列表左栏 + 右栏空态 */
+  .chat-split {
+    display: flex;
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg);
+  }
+  .chat-split > .conv-list-pane {
+    display: flex;
+    flex-direction: column;
+    width: 320px;
+    flex: none;
+    background: var(--card);
+    border-right: 0.5px solid var(--line);
+  }
+  .chat-split > .conv-empty-pane {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* WEB-04 详情页：内容 640px 居中卡片化 + 悬浮操作栏同宽 */
+  [data-page="post"] .page { background: var(--bg); }
+  [data-page="post"] .page > * {
+    max-width: 640px;
+    margin-left: auto;
+    margin-right: auto;
+    width: 100%;
+  }
+  .detail-bar {
+    max-width: 640px;
+    left: 50%;
+    transform: translateX(-50%);
+    border-radius: 16px 16px 0 0;
+    bottom: 0;
+  }
+
+  /* WEB-05 其余页面限宽居中 */
+  [data-page="publish"] .form,
+  [data-page="edit-profile"] .form { max-width: 640px; margin: 0 auto; width: 100%; }
+  [data-page="publish"] .navbar-inner,
+  [data-page="edit-profile"] .navbar-inner { max-width: 640px; margin: 0 auto; }
+
+  [data-page="notifications"] #list,
+  [data-page="ratings"] #list,
+  [data-page="safety"] .page > *,
+  [data-page="myposts"] .page > * { max-width: 680px; margin-left: auto; margin-right: auto; }
+
+  [data-page="admin"] .stat-grid { max-width: 900px; margin: 0 auto; }
+  [data-page="admin"] .card,
+  [data-page="admin"] .seg { max-width: 720px; margin-left: auto; margin-right: auto; }
+  [data-page="admin"] .seg { margin-top: 12px; }
+
+  /* 我的页：头部与网格限宽居中 */
+  [data-page="me"] .me2-hero { max-width: 860px; margin: 0 auto; width: 100%; }
+  [data-page="me"] .me2-credit,
+  [data-page="me"] .me2-tabs,
+  [data-page="me"] .me2-entries { max-width: 832px; margin-left: auto; margin-right: auto; }
+  [data-page="me"] .me2-credit { margin-top: 14px; }
+  [data-page="me"] .me2-grid { max-width: 832px; margin: 0 auto; }
+  [data-page="me"] .me2-cell { width: calc(33.333% - 7px); margin: 0 3.5px 16px; }
+
+  /* PWA 横幅桌面贴右下 */
+  #pwa-banner {
+    left: auto;
+    right: 20px;
+    bottom: 20px;
+    width: 380px;
+  }
+}
+
+/* ---------- ≥1080px：宽侧栏 + 四列瀑布流 ---------- */
+@media (min-width: 1080px) {
+  #tabbar { width: 200px; align-items: stretch; padding: 16px 0 calc(16px + var(--safe-bottom)); }
+  .tab {
+    flex-direction: row;
+    justify-content: flex-start;
+    padding: 0 24px;
+    gap: 12px;
+    height: 52px;
+  }
+  .tab .tab-icon { font-size: 22px; }
+  .tab .tab-label { font-size: 15px; font-weight: 600; }
+  .tab-publish { margin: 10px 20px; }
+  .tab-publish .tab-label { display: block; }
+  .badge { left: auto; right: auto; position: static; margin-left: auto; margin-right: 16px; }
+
+  #page-container { margin-left: 200px; }
+  #toast-wrap { left: 200px; }
+
+  /* 广场/发现：四列瀑布流（columns:4），容器 1200px 居中 */
+  .wf { column-count: 4; max-width: 1200px; }
+
+  /* 广场顶部导航与列表同宽居中 */
+  [data-page="square"] .navbar,
+  [data-page="discover"] .navbar { background: transparent; border-bottom: none; backdrop-filter: none; }
+  [data-page="square"] .navbar-inner,
+  [data-page="discover"] .navbar-inner,
+  [data-page="square"] .navbar-sub { max-width: 1200px; margin: 0 auto; }
+
+  /* 我的页：宽屏 5 列方形网格（H5-13） */
+  [data-page="me"] .me2-cell { width: calc(20% - 8px); margin: 0 4px 16px; }
+
+  /* 管理后台看板 5 列（WEB-05） */
+  [data-page="admin"] .stat-grid { grid-template-columns: repeat(5, 1fr); max-width: 1080px; }
+}

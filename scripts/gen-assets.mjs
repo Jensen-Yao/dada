@@ -36,37 +36,48 @@ for (const [name, emoji, c1, c2] of AVATARS) {
 }
 console.log(`avatars: ${AVATARS.length}`);
 
-// ---------- 封面：分类主题渐变插画 ----------
+// ---------- 封面：分类主题渐变插画（480×640 竖版 3:4，每分类 2 套配色变体） ----------
+// 变体1 保持原文件名 {key}.svg（存量 posts.images 已引用，不可改名，C5）；
+// 变体2 为 {key}-2.svg：同构图、不同渐变配色、装饰 emoji 位置镜像（BE-01）。
 const COVERS = [
-  ['food', '🍜', '#FFB199', '#FF7E5F', '🍲'],
-  ['sports', '🏃', '#FFE259', '#FFA751', '💪'],
-  ['study', '📚', '#A8CABA', '#517FA4', '✏️'],
-  ['travel', '🏔️', '#89F7FE', '#66A6FF', '🧭'],
-  ['live', '🎤', '#F953C6', '#B91D73', '🎸'],
-  ['game', '🎮', '#4E65FF', '#92EFFD', '🕹️'],
-  ['movie', '🎬', '#FA709A', '#FEE140', '🍿'],
-  ['photo', '📷', '#8EC5FC', '#E0C3FC', '🌆'],
-  ['pet', '🐕', '#F6D365', '#FDA085', '🐾'],
-  ['coffee', '☕', '#D4A373', '#FAEDCD', '🥐'],
-  ['shopping', '🛍️', '#FF9A9E', '#FECFEF', '💝'],
-  ['boardgame', '🎲', '#BFF098', '#6FD6FF', '🃏'],
-  ['commute', '🚗', '#96C93D', '#00B09B', '🛣️'],
-  ['other', '✨', '#C79081', '#DFA579', '🌈'],
+  // [key, 主emoji, 变体1渐变 c1/c2, 变体2渐变 c3/c4, 装饰emoji]
+  ['food', '🍜', '#FFB199', '#FF7E5F', '#F6D365', '#FDA085', '🍲'],
+  ['sports', '🏃', '#FFE259', '#FFA751', '#FF9A9E', '#FAD0C4', '💪'],
+  ['study', '📚', '#A8CABA', '#517FA4', '#A1C4FD', '#C2E9FB', '✏️'],
+  ['travel', '🏔️', '#89F7FE', '#66A6FF', '#43E97B', '#38F9D7', '🧭'],
+  ['live', '🎤', '#F953C6', '#B91D73', '#F093FB', '#F5576C', '🎸'],
+  ['game', '🎮', '#4E65FF', '#92EFFD', '#B721FF', '#21D4FD', '🕹️'],
+  ['movie', '🎬', '#FA709A', '#FEE140', '#A18CD1', '#FBC2EB', '🍿'],
+  ['photo', '📷', '#8EC5FC', '#E0C3FC', '#FFECD2', '#FCB69F', '🌆'],
+  ['pet', '🐕', '#F6D365', '#FDA085', '#FFDEE9', '#B5FFFC', '🐾'],
+  ['coffee', '☕', '#D4A373', '#FAEDCD', '#EACDA3', '#D6AE7B', '🥐'],
+  ['shopping', '🛍️', '#FF9A9E', '#FECFEF', '#FC5C7D', '#6A82FB', '💝'],
+  ['boardgame', '🎲', '#BFF098', '#6FD6FF', '#FF9966', '#FF5E62', '🃏'],
+  ['commute', '🚗', '#96C93D', '#00B09B', '#7F7FD5', '#86A8E7', '🛣️'],
+  ['other', '✨', '#C79081', '#DFA579', '#FBC2EB', '#A6C1EE', '🌈'],
 ];
-for (const [key, emoji, c1, c2, deco] of COVERS) {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
+const CW = 480;
+const CH = 640; // 3:4 竖版，适配瀑布流
+function coverSvg(c1, c2, emoji, deco, mirror) {
+  const mx = (x) => (mirror ? CW - x : x);
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${CW}" height="${CH}" viewBox="0 0 ${CW} ${CH}">
   <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
     <stop offset="0" stop-color="${c1}"/><stop offset="1" stop-color="${c2}"/>
   </linearGradient></defs>
-  <rect width="640" height="360" fill="url(#g)"/>
-  <circle cx="540" cy="60" r="110" fill="#ffffff" opacity="0.16"/>
-  <circle cx="80" cy="310" r="140" fill="#ffffff" opacity="0.12"/>
-  <circle cx="600" cy="300" r="46" fill="#ffffff" opacity="0.18"/>
-  <text x="320" y="185" font-size="170" text-anchor="middle" dominant-baseline="central">${emoji}</text>
-  <text x="556" y="76" font-size="60" text-anchor="middle" dominant-baseline="central" opacity="0.9">${deco}</text>
-  <text x="92" y="292" font-size="48" text-anchor="middle" dominant-baseline="central" opacity="0.85">${deco}</text>
+  <rect width="${CW}" height="${CH}" fill="url(#g)"/>
+  <circle cx="${mx(396)}" cy="92" r="104" fill="#ffffff" opacity="0.16"/>
+  <circle cx="${mx(84)}" cy="536" r="132" fill="#ffffff" opacity="0.12"/>
+  <circle cx="${mx(430)}" cy="564" r="44" fill="#ffffff" opacity="0.18"/>
+  <text x="${CW / 2}" y="${CH / 2}" font-size="176" text-anchor="middle" dominant-baseline="central">${emoji}</text>
+  <text x="${mx(408)}" y="92" font-size="56" text-anchor="middle" dominant-baseline="central" opacity="0.9">${deco}</text>
+  <text x="${mx(76)}" y="540" font-size="46" text-anchor="middle" dominant-baseline="central" opacity="0.85">${deco}</text>
 </svg>`;
-  fs.writeFileSync(path.join(IMG_DIR, 'covers', `${key}.svg`), svg);
 }
-console.log(`covers: ${COVERS.length}`);
+let coverCount = 0;
+for (const [key, emoji, c1, c2, c3, c4, deco] of COVERS) {
+  fs.writeFileSync(path.join(IMG_DIR, 'covers', `${key}.svg`), coverSvg(c1, c2, emoji, deco, false));
+  fs.writeFileSync(path.join(IMG_DIR, 'covers', `${key}-2.svg`), coverSvg(c3, c4, emoji, deco, true));
+  coverCount += 2;
+}
+console.log(`covers: ${coverCount} (${COVERS.length} 分类 x 2 变体)`);
 console.log('DONE ->', IMG_DIR);

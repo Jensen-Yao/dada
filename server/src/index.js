@@ -28,7 +28,15 @@ const UPLOAD_DIR = path.join(__dirname, '..', 'data', 'uploads');
 const WEB_DIR = path.join(__dirname, '..', '..', 'web', 'public');
 app.use('/uploads', express.static(UPLOAD_DIR));
 if (fs.existsSync(WEB_DIR)) {
-  app.use(express.static(WEB_DIR, { extensions: ['html'] }));
+  app.use(express.static(WEB_DIR, {
+    extensions: ['html'],
+    // /img/* 文件名即版本（封面/头像为内容寻址静态资产），长缓存利于 PWA 与桌面端加载（BE-05）
+    setHeaders(res, filePath) {
+      if (filePath.includes(`${path.sep}img${path.sep}`)) {
+        res.setHeader('Cache-Control', 'public, max-age=604800');
+      }
+    },
+  }));
 }
 
 const api = express.Router();
