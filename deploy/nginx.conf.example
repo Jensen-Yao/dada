@@ -1,0 +1,142 @@
+# =====================================================================
+# 搭搭 App — Nginx 反向代理配置（示例）
+# =====================================================================
+# 用法：
+#   sudo cp deploy/nginx.conf.example /etc/nginx/conf.d/dada.conf
+#   （Debian/Ubuntu 也可放 sites-available/ 并软链到 sites-enabled/）
+#   sudo nginx -t && sudo systemctl reload nginx
+#
+# HTTPS（一句话）：certbot --nginx -d dada.example.com 会自动签发 Let's Encrypt
+#   证书、注入 443 配置并加 HTTP→HTTPS 跳转；也可手动放开下方「443 模板」。
+#
+# 关键点：
+#   * /ws 为 WebSocket（实时聊天），必须带 Upgrade/Connection 协议升级头；
+#     HTTPS 下前端自动用 wss://，由 nginx 终结 TLS 后仍以 ws 转发到 3000 端口
+#   * client_max_body_size 12m：帖子多图上传（multer 单张已限制，此处留余量）
+#   * /img/* 为内容寻址静态资产（文件名即版本），浏览器长缓存
+# =====================================================================
+
+# WebSocket 升级头映射：客户端带 Upgrade 头时转发之，普通请求置 close
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+upstream dada_app {
+    server 127.0.0.1:3000;
+    keepalive 32;
+}
+
+# gzip：HTML/JS/CSS/JSON/SVG 文本类压缩（图片本身已压缩，不重复处理）
+gzip on;
+gzip_comp_level 5;
+gzip_min_length 1024;
+gzip_vary on;
+gzip_types text/plain text/css application/javascript application/json image/svg+xml application/manifest+json;
+
+# ---------------------------------------------------------------
+# 80 端口：默认直接反代（保证证书签发前服务可用）；HTTPS 就绪后放开跳转
+# ---------------------------------------------------------------
+server {
+    listen 80;
+    listen [::]:80;
+    server_name dada.example.com;
+
+    # —— HTTP 跳 HTTPS 占位：证书就绪后取消下一行注释（certbot 也会自动加）——
+    # return 301 https://$host$request_uri;
+
+    # 图片上传上限（头像 + 帖子多图）
+    client_max_body_size 12m;
+
+    # WebSocket：/ws 协议升级，不缓冲、读写超时放宽（心跳间隔 30s，300s 兜底）
+    location /ws {
+        proxy_pass http://dada_app;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Host       $host;
+        proxy_set_header X-Real-IP  $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout  300s;
+        proxy_send_timeout  300s;
+        proxy_buffering off;
+    }
+
+    # 内容寻址静态资产（logo/封面/演示头像，文件名带版本）：长缓存
+    location /img/ {
+        proxy_pass http://dada_app;
+        proxy_set_header Host $host;
+        proxy_hide_header Cache-Control;   # 以 nginx 为唯一权威，避免与应用端叠加重复头
+        add_header Cache-Control "public, max-age=604800";
+    }
+
+    # 用户上传（头像/帖子图）：按天缓存
+    location /uploads/ {
+        proxy_pass http://dada_app;
+        proxy_set_header Host $host;
+        proxy_hide_header Cache-Control;
+        add_header Cache-Control "public, max-age=86400";
+    }
+
+    # 其余全部反代：/api/* 与前端页面（SPA fallback）
+    location / {
+        proxy_pass http://dada_app;
+        proxy_http_version 1.1;
+        proxy_set_header Host       $host;
+        proxy_set_header X-Real-IP  $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+# ---------------------------------------------------------------
+# 443 模板：整段取消注释并替换证书路径后可用（WSS 即此处 TLS 终结后仍走 ws）
+# ---------------------------------------------------------------
+# server {
+#     listen 443 ssl;
+#     listen [::]:443 ssl;
+#     http2 on;
+#     server_name dada.example.com;
+#
+#     ssl_certificate     /etc/letsencrypt/live/dada.example.com/fullchain.pem;
+#     ssl_certificate_key /etc/letsencrypt/live/dada.example.com/privkey.pem;
+#     ssl_protocols TLSv1.2 TLSv1.3;
+#
+#     client_max_body_size 12m;
+#
+#     location /ws {
+#         proxy_pass http://dada_app;
+#         proxy_http_version 1.1;
+#         proxy_set_header Upgrade    $http_upgrade;
+#         proxy_set_header Connection $connection_upgrade;
+#         proxy_set_header Host       $host;
+#         proxy_set_header X-Real-IP  $remote_addr;
+#         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+#         proxy_set_header X-Forwarded-Proto $scheme;
+#         proxy_read_timeout  300s;
+#         proxy_send_timeout  300s;
+#         proxy_buffering off;
+#     }
+#
+#     location /img/ {
+#         proxy_pass http://dada_app;
+#         proxy_set_header Host $host;
+#         add_header Cache-Control "public, max-age=604800";
+#     }
+#
+#     location /uploads/ {
+#         proxy_pass http://dada_app;
+#         proxy_set_header Host $host;
+#         add_header Cache-Control "public, max-age=86400";
+#     }
+#
+#     location / {
+#         proxy_pass http://dada_app;
+#         proxy_http_version 1.1;
+#         proxy_set_header Host       $host;
+#         proxy_set_header X-Real-IP  $remote_addr;
+#         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+#         proxy_set_header X-Forwarded-Proto $scheme;
+#     }
+# }

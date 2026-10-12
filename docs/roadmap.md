@@ -50,3 +50,19 @@
 - [ ] start.sh增加Capacitor打包前置检查（server.url仍为占位域名时告警）
 - [ ] 轮播组件无障碍：图片alt、页码aria-live、键盘左右键
 - [ ] ic()图标助手收敛到ui.js统一契约（消除conv/chat重复定义）
+
+## v2.2 候选项（上架/QA/DevOps专项产出，2026-10）
+
+### 合规硬门槛（上架前必须，来源：上架agent风险报告）
+- [ ] **手机号实名注册**：当前用户名+密码注册过不了国内商店社交类目核查与安全评估，需接短信SDK
+- [ ] **算法备案**：发现页"为你推荐"触发算法备案义务
+- [ ] **属地网信安全评估**：UGC+私聊场景必备材料
+- [ ] 隐私政策静态镜像页（hash路由部分审核机抓取不到，影响iOS审核）
+- [ ] 软著申请 + ICP备案 + App备案 + 公安备案（材料清单见 docs/release/android-stores.md）
+
+### 产品缺陷与技术债
+- [x] ~~审批通过后无UI入口创建会话~~（已修：approve自动getOrCreateConv + "去聊天"直达 /#/conv/:id）
+- [ ] conv.js/chat.js 的 DOMNodeRemoved 弃用事件迁移到 MutationObserver（QA P3）
+- [ ] Docker部署：uploads路径硬编码建议改为环境变量（当前用镜像内软链绕开）
+- [ ] 公网部署安全：强制改 DADA_JWT_SECRET、禁 production seed（admin/123456 弱口令风险）
+- [ ] SQLite单写者限制：扩容前必须迁移PostgreSQL

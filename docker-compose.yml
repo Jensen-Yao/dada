@@ -1,0 +1,43 @@
+# =====================================================================
+# 搭搭 App — Docker Compose 一键部署
+# =====================================================================
+# 快速上手（在仓库根目录执行）：
+#   docker compose up -d                        # 构建并后台启动，数据持久化在卷 dada-data
+#   docker compose ps                           # 查看健康状态（healthcheck 打 /api/meta）
+#   docker compose logs -f app                  # 跟看日志
+#
+# 演示数据（可选）：首次启动应用会自动建空库；需要演示账号/帖子/聊天时手动灌入
+#   docker compose exec app node src/seed.js    # 演示账号密码均为 123456（含 admin）
+#   ⚠️ 演示数据含弱密码与 admin 账号，公网部署前请勿执行，或灌入后立即改密
+#
+# 升级：git pull && docker compose up -d --build   （数据在卷中不受影响）
+# 备份：见 README「部署」章节，或
+#   docker compose exec app tar czf /tmp/dada-data.tgz -C /data . \
+#     && docker compose cp app:/tmp/dada-data.tgz ./dada-data-backup.tgz
+# =====================================================================
+
+services:
+  app:
+    build: .
+    image: dada:latest
+    container_name: dada-app
+    ports:
+      - "3000:3000"          # 生产建议前置 nginx 反代（见 deploy/nginx.conf.example），改为 127.0.0.1:3000:3000
+    volumes:
+      - dada-data:/data      # sqlite 数据库 + uploads 上传文件
+    environment:
+      - DADA_PORT=3000
+      - DADA_DB=/data/dada.sqlite
+      # 生产环境必须换成足够长的随机串（影响登录态 JWT 签名）：openssl rand -hex 32
+      - DADA_JWT_SECRET=please-change-me-to-a-long-random-string
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:3000/api/meta"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  dada-data:
+    name: dada-data          # 固定卷名，便于备份脚本引用（docker volume ls 可见）

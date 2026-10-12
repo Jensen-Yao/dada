@@ -170,6 +170,70 @@ cd android
 - **后续升级路径（本地离线包）**：若希望 App 完全离线可用，可将 `server.url` 从配置中移除，Capacitor 会直接加载 `webDir` 内的静态文件，届时需把 API 地址改为绝对 URL 并处理跨域——本版不做，保持零构建
 - **本仓库不提交** `android/`、`ios/` 平台目录与 keystore；`npm i` 后按上文步骤生成即可
 
+## 🚢 部署
+
+### 三种方式对照
+
+| 方式 | 适合场景 | 数据位置 | 要点 |
+| --- | --- | --- | --- |
+| **Docker Compose（推荐）** | 绝大多数生产/演示环境 | named volume `dada-data`（容器内 `/data`） | 仓库根 `docker compose up -d`；配置见 `docker-compose.yml` 与 `Dockerfile` |
+| **裸机 systemd** | 不用 Docker 的服务器 | `DADA_DB` 指向的文件（如 `/var/lib/dada/dada.sqlite`）+ `server/data/uploads` | 单元模板见 `deploy/systemd-example.service` |
+| **手动 node** | 本机临时跑 / 调试 | 默认 `server/data/` | `npm i` 后 `npm start`（即 `node server/src/index.js`） |
+
+**Docker Compose 上手**（前提：已装 Docker 与 compose 插件）：
+
+```bash
+docker compose up -d            # 构建并后台启动，健康检查打 /api/meta
+docker compose logs -f app      # 看日志
+docker compose exec app node src/seed.js   # 可选：灌演示数据（账号密码均 123456，含 admin）
+```
+
+> ⚠️ 演示数据含弱密码与 `admin` 账号，**公网环境不要执行 seed**；本地演示结束后建议清库重新上线。
+
+也可以用 `deploy/deploy.sh` 一键 rsync 到服务器 + 备份数据卷 + `docker compose up -d --build`（变量置顶按需修改）。生产建议前置 nginx 反代：模板见 `deploy/nginx.conf.example`（已含 `/ws` 的 WebSocket 升级头、12m 上传上限、静态缓存与 gzip）。
+
+### 环境变量
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `DADA_PORT` | `3000` | HTTP 与 WebSocket（`/ws`）共用端口 |
+| `DADA_DB` | `server/data/dada.sqlite` | SQLite 数据库文件路径（父目录不存在会自动创建） |
+| `DADA_JWT_SECRET` | `dada-dev-secret-change-me` | 登录态 JWT 签名密钥，**生产必须改**（建议 `openssl rand -hex 32`） |
+
+### 数据备份
+
+需要备份两类数据，缺一不可：
+
+- **SQLite 数据库文件**：即 `DADA_DB` 指向的文件。WAL 模式下直接复制主文件可能漏掉 `-wal`/`-shm`，严谨做法是用 sqlite 自带备份：`sqlite3 /var/lib/dada/dada.sqlite ".backup '/backup/dada.sqlite'"`；图省事可整目录打包（连同 `*-wal`、`*-shm` 一起，且恢复时一并还原）。
+- **uploads 目录**：用户上传的头像与帖子图，Docker 部署在 `/data/uploads`（卷 `dada-data` 内），裸机部署在 `server/data/uploads`。
+
+Docker 部署一键备份（快照式）：
+
+```bash
+docker compose exec app tar czf /tmp/dada-data.tgz -C /data . \
+  && docker compose cp app:/tmp/dada-data.tgz ./dada-data-backup.tgz
+```
+
+### HTTPS 与 WSS
+
+- 证书：`certbot --nginx -d dada.example.com` 一条命令完成 Let's Encrypt 签发与 nginx 配置改写（模板见 `deploy/nginx.conf.example`，内含 443 配置段）。
+- WebSocket：前端按页面协议自动选择 `ws://` / `wss://`，走同端口 `/ws` 路径。**nginx 反代必须在 `/ws` 的 location 里加 `Upgrade`/`Connection` 升级头**（模板已写好），否则聊天实时功能失联。HTTPS 由 nginx 终结 TLS 后，向后端仍以 HTTP/WS 明文转发（本机回环，风险可控）。
+
+### 升级流程
+
+```bash
+git pull
+# Docker 部署（数据在卷里，不受重建影响）：
+docker compose up -d --build
+# 裸机部署：
+cd server && npm i --production   # 等价 npm i --omit=dev，仅当依赖有变动时需要
+sudo systemctl restart dada
+```
+
+- **SQLite 无需迁移**：本项目数据库 schema 由应用启动时 `CREATE TABLE IF NOT EXISTS` + 轻量 `ALTER TABLE ... ADD COLUMN`（try/catch 幂等）保证，升级即迁移，正常 `git pull` 后重启即可。
+- **例外**：如果未来 schema 变更超出"加列/加表"（改列类型、删列、数据搬移），`CREATE IF NOT EXISTS` 覆盖不到老库，需要在 `server/src/db.js` 里写显式迁移逻辑，并**先备份再升级**；升级前用演示库演练一遍。
+- 升级前务必按上文做一次数据备份（`deploy/deploy.sh` 已内置自动备份步骤）。
+
 ## 📄 License
 
 MIT

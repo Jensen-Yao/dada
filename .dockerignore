@@ -1,0 +1,14 @@
+# 构建上下文瘦身：只保留 Dockerfile 显式 COPY 的内容
+.git
+node_modules
+server/node_modules
+server/data
+docs
+scripts
+android
+ios
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+Dockerfile
+docker-compose.yml

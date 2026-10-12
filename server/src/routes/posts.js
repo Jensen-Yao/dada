@@ -4,6 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { db, now } from '../db.js';
+import { getOrCreateConv } from './chat.js';
 import {
   requireAuth, optionalAuth, ok, publicUser, safeJSON,
   CATEGORY_MAP, FEE_MODES, RATE_TAGS, filterContent, notify, addCredit,
@@ -287,6 +288,8 @@ postsRouter.post('/:id/joins/:joinId/approve', requireAuth, (req, res) => {
   if (approve && approved >= p.need_count) return res.status(400).json({ error: '人数已满' });
   db.prepare("UPDATE joins SET status = ?, updated_at = ? WHERE id = ?").run(approve ? 'approved' : 'rejected', now(), j.id);
   if (approve) {
+    // 通过即建立站内会话，保证"去聊天"有入口
+    getOrCreateConv(p.user_id, j.user_id, p.id);
     notify(j.user_id, 'join_result', '申请已通过 🎉', `你已加入「${p.title}」，快去和组局者聊聊吧`, { post_id: p.id });
     if (approved + 1 >= p.need_count) db.prepare("UPDATE posts SET status = 'full' WHERE id = ?").run(p.id);
   } else {

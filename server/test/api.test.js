@@ -292,4 +292,296 @@ test('认证加分', async () => {
   assert.ok(me.json.data.credit > 600);
 });
 
+// ==================================================================
+// 以下为扩充用例（QA 追加，覆盖原先无测试的功能点）
+// ==================================================================
+
+let tokenC, userIdC, qaReapplyPid, qaFullPid;
+
+test('用户：编辑资料tags超过10个截断到10', async () => {
+  const tags = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十', '十一', '这个标签特别长需要被截断到十二个字'];
+  const r = await api('PUT', '/api/users/me', { tags }, tokenA);
+  assert.equal(r.status, 200);
+  assert.equal(r.json.data.tags.length, 10, 'should truncate to 10 tags');
+  assert.ok(r.json.data.tags.every((t) => t.length <= 12), 'each tag <= 12 chars');
+  // 恢复原有标签，避免影响其他用例
+  await api('PUT', '/api/users/me', { tags: ['美食', '摄影'] }, tokenA);
+});
+
+test('用户：出生年份非法值返回400', async () => {
+  for (const bad of [1899, 2015, 'abc', 0]) {
+    const r = await api('PUT', '/api/users/me', { birth_year: bad }, tokenA);
+    assert.equal(r.status, 400, `birth_year=${bad} should be rejected`);
+    assert.equal(r.json.error, '出生年份不合法');
+  }
+  // 合法值可以通过，并正确计算年龄
+  const okR = await api('PUT', '/api/users/me', { birth_year: 2000 }, tokenA);
+  assert.equal(okR.status, 200);
+  assert.equal(okR.json.data.age, new Date().getFullYear() - 2000);
+});
+
+test('用户：他人主页rating_tags聚合', async () => {
+  // 此前「评价体系」用例中 A 给 B 打过 5 星、标签 ['靠谱','守时']
+  const r = await api('GET', `/api/users/${userIdB}`);
+  assert.equal(r.status, 200);
+  const d = r.json.data;
+  assert.ok(Array.isArray(d.rating_tags));
+  assert.ok(d.rating_tags.includes('靠谱'), 'rating_tags should include 靠谱');
+  assert.ok(d.rating_tags.includes('守时'), 'rating_tags should include 守时');
+  assert.ok(d.rating_count >= 1);
+  assert.equal(d.rating_avg, 5);
+});
+
+test('用户：拉黑列表与取消拉黑', async () => {
+  // 不能拉黑自己
+  const self = await api('POST', `/api/users/${userIdB}/block`, {}, tokenB);
+  assert.equal(self.status, 400);
+  // 拉黑 A
+  const blk = await api('POST', `/api/users/${userIdA}/block`, {}, tokenB);
+  assert.equal(blk.status, 200);
+  assert.equal(blk.json.data.blocked, true);
+  // 拉黑列表可见
+  const list = await api('GET', '/api/users/me/blocks', null, tokenB);
+  assert.equal(list.status, 200);
+  assert.ok(list.json.data.some((u) => u.id === userIdA), 'blocks list should contain A');
+  // 取消拉黑
+  const del = await api('DELETE', `/api/users/${userIdA}/block`, null, tokenB);
+  assert.equal(del.status, 200);
+  assert.equal(del.json.data.blocked, false);
+  const list2 = await api('GET', '/api/users/me/blocks', null, tokenB);
+  assert.equal(list2.json.data.length, 0, 'blocks list should be empty after unblock');
+});
+
+test('帖子：cover与aspect字段存在且确定性（id%3 / id%2 公式）', async () => {
+  const created = await api('POST', '/api/posts', {
+    category: 'food', title: 'QA封面确定性无图局', content: '无配图帖', city: '北京',
+  }, tokenA);
+  assert.equal(created.status, 200);
+  const pid = created.json.data.id;
+  const expectAspect = ['3:4', '1:1', '4:3'][pid % 3];
+  const expectCover = `/img/covers/food${pid % 2 ? '-2' : ''}.svg`;
+  const r1 = await api('GET', `/api/posts/${pid}`);
+  const r2 = await api('GET', `/api/posts/${pid}`);
+  for (const [i, r] of [r1, r2].entries()) {
+    assert.equal(r.status, 200);
+    assert.ok(r.json.data.cover, 'cover should exist');
+    assert.ok(r.json.data.aspect, 'aspect should exist');
+    assert.equal(r.json.data.aspect, expectAspect, `aspect = ASPECTS[id % 3] (request #${i + 1})`);
+    assert.equal(r.json.data.cover, expectCover, `cover follows id parity formula (request #${i + 1})`);
+  }
+  assert.equal(r1.json.data.cover, r2.json.data.cover, 'same id twice → identical cover');
+  assert.equal(r1.json.data.aspect, r2.json.data.aspect, 'same id twice → identical aspect');
+});
+
+test('帖子：多图帖返回images数组', async () => {
+  const list = await api('GET', '/api/posts?keyword=日料放题');
+  assert.equal(list.status, 200);
+  const p = list.json.data.list[0];
+  assert.ok(Array.isArray(p.images), 'images should be an array');
+  assert.equal(p.images.length, 3, 'seeded demo post has 3 images');
+  assert.equal(p.cover, p.images[0], 'cover uses first image when present');
+  const list2 = await api('GET', '/api/posts?keyword=剧本杀');
+  const p2 = list2.json.data.list[0];
+  assert.ok(Array.isArray(p2.images) && p2.images.length === 2, 'second demo post has 2 images');
+});
+
+test('帖子：被拒绝后可重新申请', async () => {
+  // 注册第三个用户
+  const reg = await api('POST', '/api/auth/register', {
+    username: 'tester_c', password: '123456', nickname: '测试丙', gender: 'female', city: '北京',
+  });
+  assert.equal(reg.status, 200);
+  tokenC = reg.json.data.token;
+  userIdC = reg.json.data.user.id;
+  // A 发布 need_count=2 的局（通过/拒绝都不会满员）
+  const created = await api('POST', '/api/posts', {
+    category: 'coffee', title: 'QA拒绝复申测试局', content: 'x', city: '北京', need_count: 2,
+  }, tokenA);
+  assert.equal(created.status, 200);
+  qaReapplyPid = created.json.data.id;
+  // C 首次申请
+  const j1 = await api('POST', `/api/posts/${qaReapplyPid}/join`, { message: '第一次申请' }, tokenC);
+  assert.equal(j1.status, 200);
+  // A 婉拒
+  const list = await api('GET', `/api/posts/${qaReapplyPid}/joins`, null, tokenA);
+  const joinId = list.json.data.find((x) => x.user.id === userIdC).id;
+  const rj = await api('POST', `/api/posts/${qaReapplyPid}/joins/${joinId}/approve`, { approve: false }, tokenA);
+  assert.equal(rj.status, 200);
+  // C 视角 my_join = rejected
+  const d1 = await api('GET', `/api/posts/${qaReapplyPid}`, null, tokenC);
+  assert.equal(d1.json.data.my_join, 'rejected');
+  // C 重新申请成功，且不产生重复记录
+  const j2 = await api('POST', `/api/posts/${qaReapplyPid}/join`, { message: '第二次申请' }, tokenC);
+  assert.equal(j2.status, 200);
+  assert.equal(j2.json.data.status, 'pending');
+  const list2 = await api('GET', `/api/posts/${qaReapplyPid}/joins`, null, tokenA);
+  assert.equal(list2.json.data.filter((x) => x.user.id === userIdC).length, 1, 'should not duplicate join record');
+  assert.equal(list2.json.data.find((x) => x.user.id === userIdC).status, 'pending');
+});
+
+test('帖子：fulled状态下加入被拒400', async () => {
+  const created = await api('POST', '/api/posts', {
+    category: 'game', title: 'QA满员测试局', content: 'only one slot', city: '北京', need_count: 1,
+  }, tokenA);
+  assert.equal(created.status, 200);
+  qaFullPid = created.json.data.id;
+  const j = await api('POST', `/api/posts/${qaFullPid}/join`, { message: '带我一个' }, tokenC);
+  assert.equal(j.status, 200);
+  const list = await api('GET', `/api/posts/${qaFullPid}/joins`, null, tokenA);
+  const joinId = list.json.data.find((x) => x.user.id === userIdC).id;
+  const ap = await api('POST', `/api/posts/${qaFullPid}/joins/${joinId}/approve`, { approve: true }, tokenA);
+  assert.equal(ap.status, 200);
+  const detail = await api('GET', `/api/posts/${qaFullPid}`);
+  assert.equal(detail.json.data.status, 'full', 'post becomes full when approved reaches need_count');
+  // 满员后再申请 → 400
+  const j2 = await api('POST', `/api/posts/${qaFullPid}/join`, {}, tokenC);
+  assert.equal(j2.status, 400);
+  const j3 = await api('POST', `/api/posts/${qaFullPid}/join`, {}, tokenB);
+  assert.equal(j3.status, 400, 'other users also blocked when full');
+});
+
+test('聊天：/chat/convs 列表含unread未读计数', async () => {
+  const { handleChatMessage } = await import('../src/routes/chat.js');
+  const { db } = await import('../src/db.js');
+  const convs = await api('GET', '/api/chat/convs', null, tokenA);
+  assert.equal(convs.status, 200);
+  const conv = convs.json.data.find((c) => c.other && c.other.id === userIdB);
+  assert.ok(conv, 'A↔B conv from earlier tests should exist');
+  assert.equal(typeof conv.unread, 'number', 'unread should be numeric');
+  const before = conv.unread;
+  // B 用内部函数补发一条
+  const userB = db.prepare('SELECT * FROM users WHERE id = ?').get(userIdB);
+  const sent = handleChatMessage(userB, conv.id, '补发一条：周六不见不散');
+  assert.ok(!sent.error, 'send should succeed: ' + (sent.error || ''));
+  const convs2 = await api('GET', '/api/chat/convs', null, tokenA);
+  assert.equal(convs2.json.data.find((c) => c.other && c.other.id === userIdB).unread, before + 1);
+  // A 拉取消息（自动标记已读）后未读清零
+  await api('GET', `/api/chat/conv/${conv.id}/messages`, null, tokenA);
+  const convs3 = await api('GET', '/api/chat/convs', null, tokenA);
+  assert.equal(convs3.json.data.find((c) => c.other && c.other.id === userIdB).unread, 0, 'unread clears after read');
+});
+
+test('聊天：首条消息后注入type=safety系统提示', async () => {
+  // C 与 A 有同局关系（QA拒绝复申局 pending），可开启会话
+  const conv = await api('POST', '/api/chat/conv', { user_id: userIdA, post_id: qaReapplyPid }, tokenC);
+  assert.equal(conv.status, 200);
+  const convId = conv.json.data.id;
+  const { handleChatMessage } = await import('../src/routes/chat.js');
+  const { db } = await import('../src/db.js');
+  const userC = db.prepare('SELECT * FROM users WHERE id = ?').get(userIdC);
+  const sent = handleChatMessage(userC, convId, '第一次发消息，请多关照');
+  assert.ok(!sent.error, 'send should succeed: ' + (sent.error || ''));
+  const msgs = await api('GET', `/api/chat/conv/${convId}/messages`, null, tokenC);
+  assert.equal(msgs.status, 200);
+  const safety = msgs.json.data.messages.find((m) => m.type === 'safety');
+  assert.ok(safety, 'safety tip should be injected after first message');
+  assert.ok(safety.content.includes('安全提示'));
+});
+
+test('聊天：被拉黑等场景 handleChatMessage 返回error分支', async () => {
+  const { handleChatMessage } = await import('../src/routes/chat.js');
+  const { db } = await import('../src/db.js');
+  const userA = db.prepare('SELECT * FROM users WHERE id = ?').get(userIdA);
+  const userC = db.prepare('SELECT * FROM users WHERE id = ?').get(userIdC);
+  // B 拉黑 A 后，A 在 A↔B 会话发消息应报错
+  await api('POST', `/api/users/${userIdA}/block`, {}, tokenB);
+  const convs = await api('GET', '/api/chat/convs', null, tokenA);
+  const convAB = convs.json.data.find((c) => c.other && c.other.id === userIdB);
+  const r1 = handleChatMessage(userA, convAB.id, '拉黑后还能发吗');
+  assert.ok(r1.error, 'blocked pair should error');
+  assert.ok(r1.error.includes('拉黑'), 'error mentions 拉黑: ' + r1.error);
+  // 非会话成员发消息
+  const r2 = handleChatMessage(userC, convAB.id, 'hello');
+  assert.equal(r2.error, '无权在该会话发送消息');
+  // 空消息
+  const convAC = convs.json.data.find((c) => c.other && c.other.id === userIdC);
+  const r3 = handleChatMessage(userA, convAC.id, '   ');
+  assert.equal(r3.error, '消息不能为空');
+  // 会话不存在
+  const r4 = handleChatMessage(userA, 999999, 'x');
+  assert.equal(r4.error, '会话不存在');
+  // 清理拉黑
+  await api('DELETE', `/api/users/${userIdA}/block`, null, tokenB);
+});
+
+test('通知：/notifications/read 单条已读（ids数组）', async () => {
+  const list = await api('GET', '/api/notifications', null, tokenA);
+  assert.equal(list.status, 200);
+  const unreadBefore = list.json.data.filter((n) => !n.read);
+  assert.ok(unreadBefore.length >= 2, 'need at least 2 unread notifications');
+  const target = unreadBefore[0];
+  const r = await api('POST', '/api/notifications/read', { ids: [target.id] }, tokenA);
+  assert.equal(r.status, 200);
+  assert.equal(r.json.data.read, true);
+  const list2 = await api('GET', '/api/notifications', null, tokenA);
+  assert.equal(list2.json.data.find((n) => n.id === target.id).read, 1, 'target notification marked read');
+  const unreadAfter = list2.json.data.filter((n) => !n.read).length;
+  assert.equal(unreadAfter, unreadBefore.length - 1, 'exactly one notification got read');
+});
+
+test('安全：/safety/tips 结构（emergency数组 + community_rules数组）', async () => {
+  const r = await api('GET', '/api/safety/tips');
+  assert.equal(r.status, 200);
+  const d = r.json.data;
+  assert.ok(Array.isArray(d.emergency) && d.emergency.length >= 6, 'emergency should be an array with 6 tips');
+  for (const e of d.emergency) {
+    assert.equal(typeof e.icon, 'string');
+    assert.equal(typeof e.title, 'string');
+    assert.equal(typeof e.body, 'string');
+  }
+  assert.ok(Array.isArray(d.community_rules) && d.community_rules.length >= 6, 'community_rules should be a string array');
+  assert.ok(d.community_rules.every((s) => typeof s === 'string' && s.length > 0));
+});
+
+test('安全：SOS后admin可见待处理举报（reason=人身安全）', async () => {
+  const sos = await api('POST', '/api/safety/sos', {
+    location: '朝阳区某公园东门', note: 'QA自动演练：紧急求助流程验证',
+  }, tokenA);
+  assert.equal(sos.status, 200);
+  assert.equal(sos.json.data.reported, true);
+  // admin 的待处理举报队列中能看到这条人身安全举报
+  const reports = await api('GET', '/api/admin/reports?status=pending', null, tokenAdmin);
+  assert.equal(reports.status, 200);
+  const sosReports = reports.json.data.filter((x) => x.reason === '人身安全');
+  assert.ok(sosReports.length >= 1, 'admin should see pending SOS report');
+  assert.ok(sosReports.some((x) => x.detail.includes('紧急求助')), 'SOS report detail marked 紧急求助');
+  // 管理员收到 sos 通知
+  const notifs = await api('GET', '/api/notifications', null, tokenAdmin);
+  assert.ok(notifs.json.data.some((n) => n.type === 'sos'), 'admin should receive sos notification');
+});
+
+test('边界：不存在的帖子/用户返回404', async () => {
+  const p = await api('GET', '/api/posts/999999');
+  assert.equal(p.status, 404);
+  assert.equal(p.json.error, '搭局不存在');
+  const u = await api('GET', '/api/users/999999');
+  assert.equal(u.status, 404);
+  assert.equal(u.json.error, '用户不存在');
+  const j = await api('POST', '/api/posts/999999/join', {}, tokenB);
+  assert.equal(j.status, 404);
+  const cv = await api('POST', '/api/chat/conv', { user_id: 999999 }, tokenA);
+  assert.equal(cv.status, 404);
+});
+
+test('边界：无权限访问他人join列表403', async () => {
+  assert.ok(qaFullPid, 'full-post test should have run before');
+  const r = await api('GET', `/api/posts/${qaFullPid}/joins`, null, tokenB);
+  assert.equal(r.status, 403);
+  assert.equal(r.json.error, '只有组局者可以查看申请列表');
+});
+
+test('元数据：14分类/3费用/3性别要求/6评价标签', async () => {
+  const r = await api('GET', '/api/meta');
+  assert.equal(r.status, 200);
+  const d = r.json.data;
+  assert.equal(d.categories.length, 14);
+  assert.ok(d.categories.every((c) => c.key && c.name && c.emoji), 'each category has key/name/emoji');
+  assert.equal(d.fee_modes.length, 3);
+  assert.deepEqual(d.fee_modes.map((f) => f.key).sort(), ['aa', 'free', 'treat']);
+  assert.equal(d.gender_reqs.length, 3);
+  assert.deepEqual(d.gender_reqs.map((g) => g.key).sort(), ['any', 'female', 'male']);
+  assert.equal(d.rate_tags.length, 6);
+  assert.deepEqual(d.rate_tags, ['守时', '靠谱', '友善', '有趣', '聊得来', '再次约']);
+});
+
 console.log('\n✅ 全部 API 测试通过');

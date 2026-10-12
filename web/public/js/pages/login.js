@@ -31,6 +31,7 @@ App.register('login', async (el) => {
         </div>
       </div>
       <button class="btn primary block" id="btn-go">${mode === 'login' ? '登录' : '注册并开始找搭子'}</button>
+      <div style="text-align:center; font-size:11.5px; color:var(--text-3); margin-top:8px;">注册即代表同意<a href="#/legal/terms" style="color:var(--primary-deep); font-weight:600; text-decoration:none;">《用户协议》</a>与<a href="#/legal/privacy" style="color:var(--primary-deep); font-weight:600; text-decoration:none;">《隐私政策》</a></div>
       <div style="text-align:center; margin-top:6px;">
         <button id="btn-switch" style="color: var(--primary-deep); font-size: 14px; font-weight:600;">
           ${mode === 'login' ? '没有账号？注册一个 →' : '已有账号？去登录 →'}

@@ -194,7 +194,14 @@ App.register('post', async (el, seg) => {
     const p = post;
     if (p.is_author || p.status !== 'open') return;
     if (p.my_join === 'pending') return;
-    if (p.my_join === 'approved') { App.navigate('#/chat'); return; }
+    if (p.my_join === 'approved') {
+      // 服务端在审批通过时已建会话，这里直达
+      try {
+        const conv = await API.post('/chat/conv', { user_id: p.author.id, post_id: pid });
+        App.navigate('#/conv/' + conv.id);
+      } catch { App.navigate('#/chat'); }
+      return;
+    }
     const s = UI.sheet('申请加入「' + UI.esc(p.title.slice(0, 20)) + '」', `
       <textarea id="f-msg" class="textarea" placeholder="和组局者打个招呼吧：为什么想加入、你能满足什么要求…（选填）"></textarea>
       <button class="btn primary block" id="btn-go" style="margin-top:12px;">提交申请</button>`);
