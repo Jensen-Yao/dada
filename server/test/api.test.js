@@ -466,7 +466,14 @@ test('聊天：/chat/convs 列表含unread未读计数', async () => {
 });
 
 test('聊天：首条消息后注入type=safety系统提示', async () => {
-  // C 与 A 有同局关系（QA拒绝复申局 pending），可开启会话
+  // 私信门槛收紧（H3）：C 在 QA拒绝复申局 上是 pending，需组局者 A 先通过申请才能建会话
+  const joins = await api('GET', `/api/posts/${qaReapplyPid}/joins`, null, tokenA);
+  assert.equal(joins.status, 200);
+  const joinC = joins.json.data.find((x) => x.user.id === userIdC && x.status === 'pending');
+  assert.ok(joinC, 'C should have a pending join to approve');
+  const ap = await api('POST', `/api/posts/${qaReapplyPid}/joins/${joinC.id}/approve`, { approve: true }, tokenA);
+  assert.equal(ap.status, 200);
+  // 通过后 C（已通过成员）可与组局者 A 开启会话
   const conv = await api('POST', '/api/chat/conv', { user_id: userIdA, post_id: qaReapplyPid }, tokenC);
   assert.equal(conv.status, 200);
   const convId = conv.json.data.id;
@@ -586,6 +593,133 @@ test('元数据：14分类/3费用/3性别要求/6评价标签', async () => {
   assert.deepEqual(d.gender_reqs.map((g) => g.key).sort(), ['any', 'female', 'male']);
   assert.equal(d.rate_tags.length, 6);
   assert.deepEqual(d.rate_tags, ['守时', '靠谱', '友善', '有趣', '聊得来', '再次约']);
+});
+
+// ==================================================================
+// 评审 R1 修复回归（H3 私信门槛 / H2 拉黑落地 / H5 bio 200 / H9 conv非法id / H16 幂等 / H17 city 截断）
+// ==================================================================
+
+let tokenD, userIdD, tokenE, userIdE;
+
+test('私信门槛：pending/无approved同局关系403，通过后放行', async () => {
+  const regD = await api('POST', '/api/auth/register', { username: 'tester_d', password: '123456', nickname: '测试丁', gender: 'female', city: '北京' });
+  assert.equal(regD.status, 200);
+  tokenD = regD.json.data.token; userIdD = regD.json.data.user.id;
+  const regE = await api('POST', '/api/auth/register', { username: 'tester_e', password: '123456', nickname: '测试戊', gender: 'male', city: '北京' });
+  assert.equal(regE.status, 200);
+  tokenE = regE.json.data.token; userIdE = regE.json.data.user.id;
+  // A 发局，D、E 均为 pending 申请
+  const created = await api('POST', '/api/posts', {
+    category: 'study', title: '门槛回归测试局', content: 'x', city: '北京', need_count: 3,
+  }, tokenA);
+  assert.equal(created.status, 200);
+  const pid = created.json.data.id;
+  await api('POST', `/api/posts/${pid}/join`, {}, tokenD);
+  await api('POST', `/api/posts/${pid}/join`, {}, tokenE);
+  // pending 申请者 → 组局者：403，文案明确"申请通过后才能私信"
+  const r1 = await api('POST', '/api/chat/conv', { user_id: userIdA, post_id: pid }, tokenD);
+  assert.equal(r1.status, 403);
+  assert.ok(r1.json.error.includes('申请通过后才能私信'), 'error copy should mention 申请通过后才能私信: ' + r1.json.error);
+  // 组局者 → pending 申请者：403
+  const r2 = await api('POST', '/api/chat/conv', { user_id: userIdD, post_id: pid }, tokenA);
+  assert.equal(r2.status, 403);
+  // 同帖两个 pending 陌生人互开私聊：403
+  const r3 = await api('POST', '/api/chat/conv', { user_id: userIdE, post_id: pid }, tokenD);
+  assert.equal(r3.status, 403);
+  // 无任何关系的两个用户（不带 post_id）：403
+  const r4 = await api('POST', '/api/chat/conv', { user_id: userIdB }, tokenE);
+  assert.equal(r4.status, 403);
+  // E 仍 pending → E→A 仍 403
+  const r5 = await api('POST', '/api/chat/conv', { user_id: userIdA, post_id: pid }, tokenE);
+  assert.equal(r5.status, 403);
+  // A 通过 D 的申请后：D→A 放行
+  const list = await api('GET', `/api/posts/${pid}/joins`, null, tokenA);
+  const joinD = list.json.data.find((x) => x.user.id === userIdD);
+  const ap = await api('POST', `/api/posts/${pid}/joins/${joinD.id}/approve`, { approve: true }, tokenA);
+  assert.equal(ap.status, 200);
+  const r6 = await api('POST', '/api/chat/conv', { user_id: userIdA, post_id: pid }, tokenD);
+  assert.equal(r6.status, 200);
+  // A 再通过 E：两个已通过成员（D↔E）之间放行，且此前无预建会话
+  const list2 = await api('GET', `/api/posts/${pid}/joins`, null, tokenA);
+  const joinE = list2.json.data.find((x) => x.user.id === userIdE);
+  await api('POST', `/api/posts/${pid}/joins/${joinE.id}/approve`, { approve: true }, tokenA);
+  const r7 = await api('POST', '/api/chat/conv', { user_id: userIdE }, tokenD);
+  assert.equal(r7.status, 200);
+});
+
+test('拉黑落地：feed/评论/推荐过滤 + 点赞通知静默', async () => {
+  // D 发一局、E 发一局；E 在 D 的局下留言
+  const pD = await api('POST', '/api/posts', {
+    category: 'food', title: '拉黑过滤回归局D', content: 'x', city: '北京',
+  }, tokenD);
+  const pidD = pD.json.data.id;
+  const pE = await api('POST', '/api/posts', {
+    category: 'food', title: '拉黑过滤回归局E', content: 'x', city: '北京',
+  }, tokenE);
+  const pidE = pE.json.data.id;
+  const cm = await api('POST', `/api/posts/${pidD}/comments`, { content: '拉黑前E的评论' }, tokenE);
+  assert.equal(cm.status, 200);
+  // D 拉黑 E
+  const blk = await api('POST', `/api/users/${userIdE}/block`, {}, tokenD);
+  assert.equal(blk.status, 200);
+  // ① D 登录视角 feed 不再出现 E 的帖；游客视角不受影响
+  const feedD = await api('GET', '/api/posts?keyword=拉黑过滤回归局E', null, tokenD);
+  assert.equal(feedD.json.data.list.length, 0, 'blocked author post filtered for logged-in viewer');
+  const feedGuest = await api('GET', '/api/posts?keyword=拉黑过滤回归局E');
+  assert.equal(feedGuest.json.data.list.length, 1, 'guest view not filtered');
+  // ② 评论列表：D 视角过滤 E 的评论，游客可见
+  const cmD = await api('GET', `/api/posts/${pidD}/comments`, null, tokenD);
+  assert.equal(cmD.json.data.some((x) => x.user.id === userIdE), false, 'blocked user comment hidden');
+  const cmGuest = await api('GET', `/api/posts/${pidD}/comments`);
+  assert.equal(cmGuest.json.data.some((x) => x.user.id === userIdE), true, 'guest still sees comment');
+  // ③ 推荐接口同样过滤（D 视角无 E 的帖）
+  const rec = await api('GET', '/api/recommend?city=北京', null, tokenD);
+  assert.equal(rec.json.data.list.some((p) => p.author.id === userIdE), false, 'recommend filters blocked author');
+  // ④ E 给 D 的帖点赞 → D 不再收到点赞通知
+  const like = await api('POST', `/api/posts/${pidD}/like`, {}, tokenE);
+  assert.equal(like.status, 200);
+  const notifs = await api('GET', '/api/notifications', null, tokenD);
+  assert.equal(
+    notifs.json.data.some((n) => n.type === 'like' && n.body.includes('测试戊')),
+    false, 'like notification should be skipped when blocked'
+  );
+  // 清理拉黑，避免影响其他用例
+  await api('DELETE', `/api/users/${userIdE}/block`, null, tokenD);
+});
+
+test('边界回归：200字bio读回200 / register city截断60 / /conv/abc 404', async () => {
+  // H5：bio 200 字保存后读回长度 200（不再静默截断到 60）
+  const bio = '标'.repeat(200);
+  const edit = await api('PUT', '/api/users/me', { bio }, tokenA);
+  assert.equal(edit.status, 200);
+  assert.equal(edit.json.data.bio.length, 200, '200-char bio should persist in full');
+  const profile = await api('GET', `/api/users/${userIdA}`);
+  assert.equal(profile.json.data.bio.length, 200, 'bio read back from profile is 200 chars');
+  // H17：注册 city 超长截断到 60（与 PUT /users/me 对齐）
+  const reg = await api('POST', '/api/auth/register', {
+    username: 'citylong01', password: '123456', nickname: '城市超长', city: '超'.repeat(1000),
+  });
+  assert.equal(reg.status, 200);
+  assert.equal(reg.json.data.user.city.length, 60, 'register city truncated to 60');
+  // H9：/conv/abc（parseInt=NaN）统一返回 404"会话不存在"，而非 500
+  const badConv = await api('GET', '/api/chat/conv/abc/messages', null, tokenA);
+  assert.equal(badConv.status, 404);
+  assert.equal(badConv.json.error, '会话不存在');
+});
+
+test('发布幂等：同用户短窗口同标题同内容重复提交只落一帖', async () => {
+  const payload = { category: 'coffee', title: '幂等回归局', content: '同一内容网络重试', city: '北京' };
+  const r1 = await api('POST', '/api/posts', payload, tokenD);
+  assert.equal(r1.status, 200);
+  const r2 = await api('POST', '/api/posts', payload, tokenD);
+  assert.equal(r2.status, 200);
+  assert.equal(r2.json.data.id, r1.json.data.id, 'duplicate submit returns the original post');
+  const list = await api('GET', '/api/posts?keyword=幂等回归局');
+  assert.equal(list.json.data.list.length, 1, 'only one post persisted');
+  // 不同用户发同标题不受幂等护栏影响
+  const r3 = await api('POST', '/api/posts', payload, tokenE);
+  assert.equal(r3.status, 200);
+  assert.notEqual(r3.json.data.id, r1.json.data.id, 'same title from another user creates a new post');
 });
 
 console.log('\n✅ 全部 API 测试通过');

@@ -48,17 +48,23 @@ chatRouter.post('/conv', requireAuth, (req, res) => {
   if (target.id === req.user.id) return res.status(400).json({ error: '不能和自己聊天' });
   if (anyBlocked(req.user.id, target.id)) return res.status(403).json({ error: '无法建立会话（存在拉黑关系）' });
 
-  // 私信门槛：双方需在同一场搭局中（组局者-成员 或 成员-成员）
+  // 私信门槛（H3 收紧）：必须存在 approved 的同局关系——
+  // 组局者↔已通过成员，或同局两个已通过成员。
+  // pending / 被拒 / 无任何关系的组合一律不放行，防止"申请任意一帖即可私信作者及全部申请者"的骚扰向量。
   const related = db.prepare(`
-    SELECT 1 FROM joins j1 JOIN joins j2 ON j1.post_id = j2.post_id
-    WHERE j1.user_id = ? AND j2.user_id = ?
-      AND ((j1.status = 'approved') OR (j2.status = 'approved') OR j1.status = 'pending' OR j2.status = 'pending')
+    SELECT 1 FROM posts ps
+    WHERE (
+      (ps.user_id = ?)
+      OR EXISTS (SELECT 1 FROM joins j WHERE j.post_id = ps.id AND j.user_id = ? AND j.status = 'approved')
+    )
+    AND (
+      (ps.user_id = ?)
+      OR EXISTS (SELECT 1 FROM joins j2 WHERE j2.post_id = ps.id AND j2.user_id = ? AND j2.status = 'approved')
+    )
     LIMIT 1
-  `).get(req.user.id, target.id);
-  const isPostAuthor = post_id && db.prepare('SELECT 1 FROM posts WHERE id = ? AND user_id = ?').get(parseInt(post_id), target.id);
-  const iAmPostAuthor = post_id && db.prepare('SELECT 1 FROM posts WHERE id = ? AND user_id = ?').get(parseInt(post_id), req.user.id);
-  if (!related && !isPostAuthor && !iAmPostAuthor) {
-    return res.status(403).json({ error: '需先申请或参与对方的搭局后才能私信，防止骚扰' });
+  `).get(req.user.id, req.user.id, target.id, target.id);
+  if (!related) {
+    return res.status(403).json({ error: '申请通过后才能私信' });
   }
   const conv = getOrCreateConv(req.user.id, target.id, post_id || null);
   res.json(ok(convView(conv, req.user.id)));

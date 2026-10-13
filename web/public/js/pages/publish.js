@@ -184,14 +184,17 @@ App.register('publish', async (el) => {
     });
   }
 
+  // H19 防御性加固：进入 handler 即置 disabled（含校验阶段），任何失败路径都恢复可点，
+  // 不依赖"校验通过后才置位"的时序——未来校验变异步也不会打开双击窗口
   $('btn-publish').onclick = async () => {
-    if (!state.category) return UI.toast('先选一个搭子类型吧');
-    const title = $('f-title').value.trim();
-    if (!title) return UI.toast('标题不能为空');
-    const city = $('f-city').value.trim();
-    if (!city) return UI.toast('请填写城市');
     const btn = $('btn-publish');
+    if (btn.disabled) return;
     btn.disabled = true;
+    if (!state.category) { btn.disabled = false; return UI.toast('先选一个搭子类型吧'); }
+    const title = $('f-title').value.trim();
+    if (!title) { btn.disabled = false; return UI.toast('标题不能为空'); }
+    const city = $('f-city').value.trim();
+    if (!city) { btn.disabled = false; return UI.toast('请填写城市'); }
     try {
       const p = await API.post('/posts', {
         category: state.category, title,

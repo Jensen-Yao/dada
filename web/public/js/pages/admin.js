@@ -1,5 +1,29 @@
 /* ================= 运营后台（管理员） ================= */
 App.register('admin', async (el) => {
+  // H12：非管理员直链访问不再渲染完整后台骨架（避免逐 tab 403 的体验），
+  // 直接给"无权访问"提示页 + 返回按钮
+  const me = window.__me || await API.get('/auth/me').catch(() => null);
+  if (!me?.is_admin) {
+    el.innerHTML = `
+    <div class="navbar">
+      <div class="navbar-inner">
+        <button class="navbar-btn" onclick="history.back()">‹</button>
+        <div class="navbar-title">运营后台</div>
+        <div style="width:34px;"></div>
+      </div>
+    </div>
+    <div class="empty" style="padding-top:88px;">
+      <div class="e-icon">${UI.icon('slash', 44)}</div>
+      <div class="e-title">无权访问</div>
+      <div style="font-size:13px">运营后台仅对管理员开放</div>
+      <div style="display:flex; gap:10px; justify-content:center; margin-top:18px;">
+        <button class="btn primary" id="adm-home" style="min-width:110px;">返回我的</button>
+      </div>
+    </div>`;
+    el.querySelector('#adm-home').onclick = () => App.navigate('#/me');
+    return;
+  }
+
   el.innerHTML = `
   <div class="navbar">
     <div class="navbar-inner">

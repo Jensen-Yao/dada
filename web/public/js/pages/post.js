@@ -32,10 +32,11 @@ App.register('post', async (el, seg) => {
     const ar = (UI.aspectOf(p) || '3:4').replace(':', ' / ');
 
     // H5-10：大图轮播（scroll-snap + n/m 页码指示）；无图降级为分类线性图标头图块（EM-02）
+    // H6：图片 404 走统一兜底链（分类封面 svg → 渐变占位块）
     const mediaHTML = imgs.length ? `
     <div style="position:relative;">
       <div class="carousel" id="carousel" style="--ar:${ar}">
-        ${imgs.map((src, i) => `<img src="${UI.esc(src)}" ${i ? 'loading="lazy"' : ''} alt="">`).join('')}
+        ${imgs.map((src, i) => `<img src="${UI.esc(src)}" ${i ? 'loading="lazy"' : ''} alt="" onerror="${UI.imgFallback(p.category)}">`).join('')}
       </div>
       <span class="carousel-ind" id="car-ind">1/${imgs.length}</span>
     </div>` : `
@@ -104,7 +105,7 @@ App.register('post', async (el, seg) => {
       <button class="da-act" id="btn-comment-jump">
         ${UI.icon('comment', 22)}<span>${p.comments_count}</span>
       </button>
-      <button class="btn primary sm da-cta" id="btn-join" ${joinDisabled() ? 'disabled' : ''}>${joinBtnText()}</button>
+      <button class="btn ${joinBtnClass()} sm da-cta" id="btn-join" ${joinDisabled() ? 'disabled' : ''}>${joinBtnText()}</button>
     </div>
     `;
 
@@ -135,6 +136,8 @@ App.register('post', async (el, seg) => {
     const p = post;
     if (!API.isLogin()) return '登录后申请加入';
     if (p.is_author) return '这是我发布的搭局';
+    // H7：满员与关闭文案区分；满员给出口（点击跳广场）
+    if (p.status === 'full') return '已满员，看看其他搭局';
     if (p.status !== 'open') return '该搭局已停止招募';
     if (p.my_join === 'pending') return '已申请，等待组局者通过';
     if (p.my_join === 'approved') return `${UI.icon('check-circle', 14)} 已通过，去聊天`;
@@ -142,13 +145,21 @@ App.register('post', async (el, seg) => {
     return '申请加入';
   }
 
+  // H7：满员态主按钮用灰底去饱和样式（.btn.muted），不再是亮橙误导
+  function joinBtnClass() {
+    const p = post;
+    if (API.isLogin() && !p.is_author && p.status === 'full') return 'muted';
+    return 'primary';
+  }
+
   // 主按钮不可操作态（组局者视角/非招募中/已申请）时置灰
   function joinDisabled() {
     const p = post;
     if (!API.isLogin()) return false;
     if (p.is_author) return true;
-    if (p.status !== 'open') return true;
     if (p.my_join === 'pending') return true;
+    if (p.status === 'full') return false; // H7：满员可点击 → 跳广场
+    if (p.status !== 'open') return true;  // closed/done/expired：灰置不可点
     return false;
   }
 
@@ -161,13 +172,23 @@ App.register('post', async (el, seg) => {
       } catch { /* 用户取消 */ }
     };
     el.querySelector('#author-card').onclick = () => App.navigate('#/user/' + p.author.id);
+    // H4：点赞只做局部更新（心形图标 + 计数），不再整页 render——
+    // 原先整页重建会把轮播复位到第 1 张、清空未发送的评论文本
+    let lastLikeAt = 0; // P2：300ms 内重复点击忽略（节流）
     el.querySelector('#btn-like').onclick = async () => {
       if (!API.isLogin()) return UI.requireLogin();
+      const now = Date.now();
+      if (now - lastLikeAt < 300) return;
+      lastLikeAt = now;
       try {
         const r = await API.post(`/posts/${pid}/like`);
         post.liked = r.liked;
         post.likes_count += r.liked ? 1 : -1;
-        render();
+        const btn = el.querySelector('#btn-like');
+        if (btn) {
+          btn.classList.toggle('liked', post.liked);
+          btn.innerHTML = `${UI.icon(post.liked ? 'heartFill' : 'heart', 22)}<span>${post.likes_count}</span>`;
+        }
       } catch (err) { UI.toast(err.message); }
     };
     // 评论按钮：滚动到评论区并聚焦输入框
@@ -192,8 +213,11 @@ App.register('post', async (el, seg) => {
   async function onJoin() {
     if (!API.isLogin()) return UI.requireLogin();
     const p = post;
-    if (p.is_author || p.status !== 'open') return;
+    if (p.is_author) return;
     if (p.my_join === 'pending') return;
+    // H7：满员帖给出口——跳回广场看其他搭局（按钮文案"已满员，看看其他搭局"）
+    if (p.status === 'full') { App.navigate('#/square'); return; }
+    if (p.status !== 'open') return;
     if (p.my_join === 'approved') {
       // 服务端在审批通过时已建会话，这里直达
       try {
@@ -205,13 +229,20 @@ App.register('post', async (el, seg) => {
     const s = UI.sheet('申请加入「' + UI.esc(p.title.slice(0, 20)) + '」', `
       <textarea id="f-msg" class="textarea" placeholder="和组局者打个招呼吧：为什么想加入、你能满足什么要求…（选填）"></textarea>
       <button class="btn primary block" id="btn-go" style="margin-top:12px;">提交申请</button>`);
-    s.el.querySelector('#btn-go').onclick = async () => {
+    // P2（H14）：提交期间禁用按钮，连点不再弹出多余的错误提示
+    const go = s.el.querySelector('#btn-go');
+    go.onclick = async () => {
+      if (go.disabled) return;
+      go.disabled = true;
       try {
         await API.post(`/posts/${pid}/join`, { message: s.el.querySelector('#f-msg').value });
         s.close();
         UI.toast('已提交申请，等待组局者通过');
         load();
-      } catch (err) { UI.toast(err.message); }
+      } catch (err) {
+        UI.toast(err.message);
+        go.disabled = false;
+      }
     };
   }
 
@@ -223,7 +254,12 @@ App.register('post', async (el, seg) => {
       await API.post(`/posts/${pid}/comments`, { content: text });
       input.value = '';
       loadComments(post);
+      // H15：同步刷新"评论区（N）"标题与底栏评论计数
       post.comments_count++;
+      const anchor = el.querySelector('#comments-anchor');
+      if (anchor) anchor.textContent = `评论区（${post.comments_count}）`;
+      const jumpN = el.querySelector('#btn-comment-jump span');
+      if (jumpN) jumpN.textContent = post.comments_count;
     } catch (err) { UI.toast(err.message); }
   }
 
@@ -361,7 +397,11 @@ App.register('post', async (el, seg) => {
         else { picked.add(tag); t.classList.add('on'); }
       };
     });
-    s.el.querySelector('#btn-go').onclick = async () => {
+    // P2：提交期间禁用，防连点重复评价
+    const go = s.el.querySelector('#btn-go');
+    go.onclick = async () => {
+      if (go.disabled) return;
+      go.disabled = true;
       try {
         await API.post(`/posts/${pid}/rate`, {
           ratee_id: rateeId, stars,
@@ -370,7 +410,10 @@ App.register('post', async (el, seg) => {
         s.close();
         UI.toast('评价成功，感谢反馈');
         load();
-      } catch (err) { UI.toast(err.message); }
+      } catch (err) {
+        UI.toast(err.message);
+        go.disabled = false;
+      }
     };
   }
 

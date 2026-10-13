@@ -66,9 +66,11 @@ App.register('chat', async (el) => {
   }
 
   // 收到新消息自动刷新（本页时）
+  // H1：改用页级 App.onCleanup 卸载（DOMNodeRemoved 在 Chrome 对 innerHTML 替换不派发，
+  // 原死 handler 会对每条 WS 消息重复拉取会话列表）
   const onMsg = () => { if (App.currentTab === 'chat') load(); };
   WS.on('chat', onMsg);
-  el.addEventListener('DOMNodeRemoved', () => WS.off('chat', onMsg), { once: true });
+  App.onCleanup(() => WS.off('chat', onMsg));
 
   await load();
 });

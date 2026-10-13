@@ -58,7 +58,8 @@ usersRouter.put('/me', requireAuth, (req, res) => {
       if (!y || y < 1900 || y > new Date().getFullYear() - 12) return res.status(400).json({ error: '出生年份不合法' });
       v = y;
     } else {
-      v = String(v ?? '').trim().slice(0, 60);
+      // H5：bio 与前端 maxlength=200 对齐（此前静默截断到 60 吞掉近半内容），其余字段维持 60
+      v = String(v ?? '').trim().slice(0, k === 'bio' ? 200 : 60);
     }
     sets.push(`${k} = ?`);
     vals.push(v);

@@ -6,6 +6,19 @@ const App = (() => {
   let currentTab = '';
   let metaCache = null;
 
+  // ---------- H1 页级清理机制 ----------
+  // 页面通过 App.onCleanup(fn) 注册卸载回调（WS.off、定时器、全局监听等），
+  // render() 替换 container.innerHTML 之前依次执行并清空。
+  // 替代原先依赖 DOMNodeRemoved 的卸载方案（Chrome 对 innerHTML 替换不派发该事件，
+  // 导致 WS 回调永不卸载、错误 toast 无限叠加、死 handler 重复请求）。
+  const cleanupFns = [];
+  function onCleanup(fn) { if (typeof fn === 'function') cleanupFns.push(fn); }
+  function runCleanup() {
+    while (cleanupFns.length) {
+      try { cleanupFns.shift()(); } catch (err) { console.error('[cleanup]', err); }
+    }
+  }
+
   function register(name, render) { routes[name] = render; }
 
   async function meta() {
@@ -15,12 +28,18 @@ const App = (() => {
 
   function navigate(hash) { location.hash = hash; }
 
+  // H13 侧栏选中态：仅更新高亮，不动 tabbar 显隐
+  function setActiveTab(tab) {
+    currentTab = tab || '';
+    document.querySelectorAll('.tab').forEach((el) => el.classList.toggle('active', !!tab && el.dataset.tab === tab));
+  }
+
   function showTab(tab) {
-    currentTab = tab;
-    document.querySelectorAll('.tab').forEach((el) => el.classList.toggle('active', el.dataset.tab === tab));
+    setActiveTab(tab);
     tabbar.classList.remove('hidden');
   }
 
+  // 非 tab 页：清除残留高亮（桌面侧栏常驻，广场高亮不应保留在详情/会话等页）
   function hideTabbar() { tabbar.classList.add('hidden'); }
 
   function setBadge(id, n) {
@@ -40,6 +59,32 @@ const App = (() => {
     } catch { /* 401 已由 api 层处理 */ }
   }
 
+  // H8/H10：404 类业务错误（后端明确"不存在/无权"）渲染友好提示页：
+  // 保留顶栏 + 主行动按钮，不使用红色"页面出错了"报错态
+  function notFound(el, { sub = '', primary = { text: '返回广场', hash: '#/square' }, secondary = null } = {}) {
+    el.innerHTML = `
+    <div class="navbar">
+      <div class="navbar-inner">
+        <button class="navbar-btn" onclick="history.back()">‹</button>
+        <div class="navbar-title">内容不存在</div>
+        <div style="width:34px;"></div>
+      </div>
+    </div>
+    <div class="empty" style="padding-top:88px;">
+      <div class="e-icon">${UI.icon('search', 44)}</div>
+      <div class="e-title">内容不存在或已结束</div>
+      ${sub ? `<div style="font-size:13px">${UI.esc(sub)}</div>` : ''}
+      <div style="display:flex; gap:10px; justify-content:center; margin-top:18px;">
+        <button class="btn primary" id="nf-go" style="min-width:132px;">${UI.esc(primary.text)}</button>
+        ${secondary ? `<button class="btn plain" id="nf-alt" style="min-width:110px;">${UI.esc(secondary.text)}</button>` : ''}
+      </div>
+    </div>`;
+    el.querySelector('#nf-go').onclick = () => navigate(primary.hash);
+    el.querySelector('#nf-alt')?.addEventListener('click', () => navigate(secondary.hash));
+  }
+
+  const NOT_FOUND_RE = /不存在|无权|已删除|已注销/;
+
   async function render() {
     const hash = location.hash || '#/';
     const [, path] = hash.split('#/');
@@ -57,19 +102,28 @@ const App = (() => {
     // 页面标记：桌面端样式（desktop.css）按 body[data-page] 精准生效
     document.body.dataset.page = page;
 
+    // H1：替换容器前先执行上一页注册的卸载回调（WS.off 等）
+    runCleanup();
     container.innerHTML = '';
     const el = document.createElement('div');
     el.className = 'page';
     container.appendChild(el);
 
+    // H13：tab 页高亮自己；发布页高亮发布 tab；其余非 tab 页清空高亮（移动端仍隐藏底栏）
     const isTabPage = ['square', 'discover', 'chat', 'me'].includes(page);
-    if (isTabPage) showTab(page); else hideTabbar();
+    if (isTabPage) showTab(page);
+    else {
+      setActiveTab(page === 'publish' ? 'publish' : '');
+      hideTabbar();
+    }
 
     try {
       await routes[page]?.(el, seg.slice(1), new URLSearchParams((path || '').split('?')[1] || ''));
     } catch (err) {
       console.error(err);
-      el.innerHTML = UI.empty('alert-circle', '页面出错了', err.message || '请稍后再试');
+      const msg = err?.message || '';
+      if (NOT_FOUND_RE.test(msg)) notFound(el, { sub: msg });
+      else el.innerHTML = UI.empty('alert-circle', '页面出错了', msg || '请稍后再试');
     }
     refreshBadges();
   }
@@ -165,5 +219,5 @@ const App = (() => {
     }
   })();
 
-  return { register, navigate, meta, refreshBadges, showTab, hideTabbar, get currentTab() { return currentTab; } };
+  return { register, navigate, meta, refreshBadges, showTab, hideTabbar, onCleanup, notFound, get currentTab() { return currentTab; } };
 })();

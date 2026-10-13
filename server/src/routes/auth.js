@@ -29,7 +29,7 @@ authRouter.post('/register', (req, res) => {
     INSERT INTO users (username, password_hash, nickname, gender, birth_year, city, tags, created_at, last_active_at)
     VALUES (?,?,?,?,?,?,?,?,?)
   `).run(username, hash, String(nickname).trim(), ['male', 'female', 'secret'].includes(gender) ? gender : 'secret',
-    birth_year ? parseInt(birth_year) : null, String(city || '').trim(), '[]', t, t);
+    birth_year ? parseInt(birth_year) : null, String(city || '').trim().slice(0, 60), '[]', t, t);
   const user = findUser(info.lastInsertRowid);
   res.json(ok({ token: signToken(user), user: publicUser(user) }));
 });

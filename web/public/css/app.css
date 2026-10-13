@@ -184,6 +184,9 @@ img { display: block; max-width: 100%; }
 .btn:active { transform: scale(0.97); }
 .btn:disabled { opacity: 0.5; }
 .btn.primary { background: linear-gradient(135deg, var(--primary), #FF9A62); color: #fff; box-shadow: 0 4px 14px rgba(255,122,69,0.35); }
+/* H7：不可操作的主按钮（满员/停止招募/提交中）灰底去饱和，替代亮橙误导 */
+.btn.primary:disabled { background: linear-gradient(135deg, #CDD1D6, #DDE0E4); color: #79808A; box-shadow: none; filter: grayscale(.6); opacity: .9; }
+.btn.muted { background: var(--line); color: var(--text-2); box-shadow: none; filter: grayscale(.4); }
 .btn.ghost { background: var(--primary-soft); color: var(--primary-deep); }
 .btn.plain { background: var(--card); color: var(--text-2); box-shadow: var(--shadow-card); }
 .btn.danger { background: #FEE4E2; color: var(--danger); }
@@ -383,6 +386,17 @@ img { display: block; max-width: 100%; }
 .pin-flag.bl { bottom: 8px; left: 8px; }
 .pin-flag.tl.recruit { color: var(--success); }
 .pin-flag.tl.full { color: var(--text-2); }
+/* H7：满员帖 meta 行的灰色"已满员"pill（替代"还缺 0 人"） */
+.pin-full-pill { font-size: 10px; padding: 1px 7px; flex-shrink: 0; }
+/* H7：满员帖封面弱化（灰度 + 降透明度），与招募中卡片拉开视觉差 */
+.pin-card.is-full .pin-cover img { filter: grayscale(.55); opacity: .82; }
+/* H6：帖子图片两级降级（原图 404 → 分类封面 svg 也 404）后的渐变占位块 */
+.img-ph {
+  position: absolute; inset: 0; z-index: 1;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #FFEDE2, #FFDCC8 55%, #FFCDB0);
+  color: var(--primary-deep);
+}
 .pin-body { padding: 8px 10px 10px; }
 .pin-title {
   font-size: var(--fs-md); font-weight: 600; line-height: 1.45; color: var(--text);

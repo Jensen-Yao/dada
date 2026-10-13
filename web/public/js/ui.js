@@ -1,6 +1,8 @@
 /* ================= 搭搭 UI 组件库 ================= */
 const UI = (() => {
   // ---------- Toast ----------
+  // H1 防叠：同文案在存活期内不重复弹出；同屏最多 3 条，超出立即移除最旧
+  const toastAlive = new Map(); // msg -> 过期时间戳
   function toast(msg, ms = 2200) {
     let wrap = document.getElementById('toast-wrap');
     if (!wrap) {
@@ -8,12 +10,20 @@ const UI = (() => {
       wrap.id = 'toast-wrap';
       document.body.appendChild(wrap);
     }
+    const now = Date.now();
+    if ((toastAlive.get(msg) || 0) > now) return;
+    toastAlive.set(msg, now + ms);
+    while (wrap.children.length >= 3) wrap.firstElementChild.remove();
     const el = document.createElement('div');
     el.className = 'toast';
     el.textContent = msg;
     wrap.appendChild(el);
     setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .25s'; }, ms);
-    setTimeout(() => el.remove(), ms + 300);
+    setTimeout(() => {
+      el.remove();
+      const exp = toastAlive.get(msg) || 0;
+      if (exp <= Date.now()) toastAlive.delete(msg);
+    }, ms + 300);
   }
 
   // ---------- 底部弹层 ----------
@@ -86,6 +96,19 @@ const UI = (() => {
     if (user?.avatar) return `<div class="avatar ${size}">${avatarImg(user.avatar, user?.nickname)}</div>`;
     const ch = (user?.nickname || '?').trim().charAt(0) || '?';
     return `<div class="avatar ${size}">${esc(ch)}</div>`;
+  }
+
+  // ---------- H6 帖子图片兜底：与头像同标准的三级降级 ----------
+  // 降级链：原 src（/img/photos/... 或 /uploads/...）404 → 分类封面 /img/covers/{category}.svg →
+  // 隐藏 img、插入渐变占位块（.img-ph，含分类线性图标）。
+  // 返回可直接内嵌到 onerror="..." 的内联处理器字符串（data.fb 标记阶段，防死循环）。
+  function imgFallback(category) {
+    const cat = CAT_ICONS[category] ? category : 'other';
+    // SVG 属性内的双引号转义为 &quot;：HTML 解码后成为合法 JS 字符串内容
+    const iconSvg = catIcon(cat, 30).replace(/"/g, '&quot;');
+    return `if(!this.dataset.fb){this.dataset.fb=1;this.src='/img/covers/${cat}.svg';}`
+      + `else{this.onerror=null;this.style.display='none';`
+      + `this.insertAdjacentHTML('afterend','<div class=&quot;img-ph&quot;>${iconSvg}</div>');}`;
   }
 
   // EM-10 性别符号文字化：性别符号改为纯文字 tag（女/男）
@@ -249,7 +272,12 @@ const UI = (() => {
     const bits = [];
     if (p.city) bits.push(`${icon('location', 11)}<span>${esc(p.city)}</span>`);
     if (p.meet_time) bits.push(`${icon('clock', 11)}<span>${esc(p.meet_time)}</span>`);
-    if (typeof p.need_count === 'number') bits.push(`<span>还缺 ${Math.max(0, p.need_count - (p.approved_count || 0))} 人</span>`);
+    // H7：满员帖不再显示"还缺 0 人"，改为灰色"已满员"pill
+    if (typeof p.need_count === 'number') {
+      const lack = Math.max(0, p.need_count - (p.approved_count || 0));
+      if (p.status === 'full') bits.push('<span class="pill gray pin-full-pill">已满员</span>');
+      else bits.push(`<span>还缺 ${lack} 人</span>`);
+    }
     const meta = bits.length ? `<div class="pin-meta">${bits.join('<span style="opacity:.55">·</span>')}</div>` : '';
 
     let foot;
@@ -266,9 +294,9 @@ const UI = (() => {
     }
 
     return `
-    <div class="wf-item"><div class="pin-card" data-id="${p.id}">
+    <div class="wf-item"><div class="pin-card${p.status === 'full' ? ' is-full' : ''}" data-id="${p.id}">
       <div class="pin-cover" style="--ar:${ar}">
-        ${hasImg ? `<img src="${esc(coverOf(p))}" loading="lazy" alt="">` : `<div class="pin-emoji">${catIcon(p.category, 28)}</div>`}
+        ${hasImg ? `<img src="${esc(coverOf(p))}" loading="lazy" alt="" onerror="${imgFallback(p.category)}">` : `<div class="pin-emoji">${catIcon(p.category, 28)}</div>`}
         ${flags.join('')}
       </div>
       <div class="pin-body">
@@ -285,5 +313,5 @@ const UI = (() => {
     return `<div class="wf">${Array.from({ length: n }, (_, i) => `<div class="wf-item"><div class="skeleton" style="height:${hs[i % hs.length]}px"></div></div>`).join('')}</div>`;
   }
 
-  return { toast, sheet, confirm, esc, timeAgo, hhmm, avatarImg, avatarHTML, genderBadge, creditLabel, empty, loading, requireLogin, icon, catIcon, CAT_ICONS, starRow, coverOf, aspectOf, pinCard, wfSkeleton };
+  return { toast, sheet, confirm, esc, timeAgo, hhmm, avatarImg, avatarHTML, imgFallback, genderBadge, creditLabel, empty, loading, requireLogin, icon, catIcon, CAT_ICONS, starRow, coverOf, aspectOf, pinCard, wfSkeleton };
 })();

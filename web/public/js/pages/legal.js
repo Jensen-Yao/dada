@@ -164,6 +164,28 @@
   App.register('legal', async (el, seg) => {
     if (!document.getElementById('legal-style')) style.id = 'legal-style';
     if (!document.getElementById('legal-style')) document.head.appendChild(style);
+    // H11：未知子页不再静默渲染《隐私政策》，给明确的"页面不存在"提示
+    if (seg[0] !== 'terms' && seg[0] !== 'privacy') {
+      App.hideTabbar();
+      el.innerHTML = `
+      <div class="navbar">
+        <div class="navbar-inner">
+          <button class="navbar-btn" onclick="history.back()">‹</button>
+          <div class="navbar-title">页面不存在</div>
+          <div style="width:34px;"></div>
+        </div>
+      </div>
+      <div class="empty" style="padding-top:88px;">
+        <div class="e-icon">${UI.icon('file-text', 44)}</div>
+        <div class="e-title">文档不存在</div>
+        <div style="font-size:13px">可查阅的协议：《隐私政策》与《用户服务协议》</div>
+        <div style="display:flex; gap:10px; justify-content:center; margin-top:18px;">
+          <a class="btn primary" href="#/legal/privacy" style="min-width:110px; text-decoration:none;">隐私政策</a>
+          <a class="btn plain" href="#/legal/terms" style="min-width:110px; text-decoration:none;">用户协议</a>
+        </div>
+      </div>`;
+      return;
+    }
     const isTerms = seg[0] === 'terms';
     App.hideTabbar();
     el.innerHTML = isTerms

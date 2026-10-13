@@ -43,12 +43,17 @@ miscRouter.post('/notifications/read', requireAuth, (req, res) => {
 miscRouter.get('/recommend', optionalAuth, (req, res) => {
   const me = req.user;
   const city = req.query.city || (me ? me.city : '');
+  // 拉黑落地（H2）：登录视角过滤"我拉黑的 / 拉黑我的"用户发的帖
+  const blockFilter = me
+    ? 'AND p.user_id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = ? UNION SELECT blocker_id FROM blocks WHERE blocked_id = ?)'
+    : '';
   const rows = db.prepare(`
     SELECT p.* FROM posts p JOIN users u ON p.user_id = u.id
     WHERE p.status = 'open' AND u.status = 'active'
       AND (? IS NULL OR p.city = ?)
+      ${blockFilter}
     ORDER BY (p.likes_count + p.comments_count * 2) DESC, p.id DESC LIMIT 20
-  `).all(city || null, city || null);
+  `).all(city || null, city || null, ...(me ? [me.id, me.id] : []));
   const viewer = me || null;
   const list = rows.map((p) => {
     const author = db.prepare('SELECT * FROM users WHERE id = ?').get(p.user_id);
@@ -84,8 +89,9 @@ miscRouter.get('/for-you', requireAuth, (req, res) => {
     rows = db.prepare(`
       SELECT p.*, COUNT(*) match_c FROM posts p
       WHERE p.status = 'open' AND p.user_id != ? AND p.category IN (${ph})
+        AND p.user_id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = ? UNION SELECT blocker_id FROM blocks WHERE blocked_id = ?)
       ORDER BY match_c DESC, p.id DESC LIMIT 20
-    `).all(me.id, ...myCats);
+    `).all(me.id, ...myCats, me.id, me.id);
   }
   // 标签匹配加成
   const list = rows.map((p) => {

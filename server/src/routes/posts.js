@@ -102,6 +102,11 @@ postsRouter.get('/', optionalAuth, (req, res) => {
   const off = (p - 1) * s;
   const where = ["p.status IN ('open','full')"];
   const vals = [];
+  // 拉黑落地（H2）：登录视角过滤"我拉黑的 / 拉黑我的"用户发的帖，游客不过滤
+  if (req.user) {
+    where.push('p.user_id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = ? UNION SELECT blocker_id FROM blocks WHERE blocked_id = ?)');
+    vals.push(req.user.id, req.user.id);
+  }
   if (q.city) { where.push('p.city = ?'); vals.push(q.city); }
   if (q.category && CATEGORY_MAP[q.category]) { where.push('p.category = ?'); vals.push(q.category); }
   if (q.keyword) {
@@ -142,6 +147,14 @@ postsRouter.post('/', requireAuth, (req, res) => {
   const nc = Math.min(20, Math.max(1, parseInt(need_count) || 1));
   const fm = ['free', 'aa', 'treat'].includes(fee_mode) ? fee_mode : 'aa';
   if (!['any', 'female', 'male'].includes(gender_req || 'any')) return res.status(400).json({ error: '性别要求不合法' });
+
+  // 幂等护栏（H16）：同用户短窗口内同标题+同内容的重复提交（多 tab / 网络重试）只落一帖，直接返回已有帖。
+  // SQLite 同步执行 + 单进程事件循环，检查与插入之间无 await，天然无并发竞态。
+  const dup = db.prepare(`
+    SELECT * FROM posts WHERE user_id = ? AND title = ? AND content = ? AND created_at > ?
+    ORDER BY id DESC LIMIT 1
+  `).get(u.id, fTitle.cleaned, fContent.cleaned, now() - 60_000);
+  if (dup) return res.json(ok(postView(dup, u)));
 
   const info = db.prepare(`
     INSERT INTO posts (user_id, category, title, content, city, location_name, meet_time, need_count, fee_mode, gender_req, requirements, status, created_at)
@@ -207,17 +220,24 @@ postsRouter.post('/:id/like', requireAuth, (req, res) => {
   }
   db.prepare('INSERT INTO likes (user_id, post_id, created_at) VALUES (?,?,?)').run(req.user.id, p.id, now());
   db.prepare('UPDATE posts SET likes_count = likes_count + 1 WHERE id = ?').run(p.id);
-  if (p.user_id !== req.user.id) notify(p.user_id, 'like', '收到新点赞', `${req.user.nickname} 赞了你的搭局「${p.title}」`, { post_id: p.id });
+  if (p.user_id !== req.user.id) notify(p.user_id, 'like', '收到新点赞', `${req.user.nickname} 赞了你的搭局「${p.title}」`, { post_id: p.id }, req.user.id);
   res.json(ok({ liked: true }));
 });
 
 // ---------- 评论 ----------
 postsRouter.get('/:id/comments', optionalAuth, (req, res) => {
   const pid = parseInt(req.params.id);
-  const rows = db.prepare(`
+  let sql = `
     SELECT cm.*, u.nickname, u.avatar, u.gender FROM comments cm JOIN users u ON cm.user_id = u.id
-    WHERE cm.post_id = ? ORDER BY cm.id ASC LIMIT 200
-  `).all(pid);
+    WHERE cm.post_id = ?`;
+  const vals = [pid];
+  // 拉黑落地（H2）：登录视角过滤被拉黑用户的评论，游客不过滤
+  if (req.user) {
+    sql += ' AND cm.user_id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = ? UNION SELECT blocker_id FROM blocks WHERE blocked_id = ?)';
+    vals.push(req.user.id, req.user.id);
+  }
+  sql += ' ORDER BY cm.id ASC LIMIT 200';
+  const rows = db.prepare(sql).all(...vals);
   res.json(ok(rows.map((r) => ({
     id: r.id, content: r.content, created_at: r.created_at,
     user: { id: r.user_id, nickname: r.nickname, avatar: r.avatar, gender: r.gender },
@@ -233,7 +253,7 @@ postsRouter.post('/:id/comments', requireAuth, (req, res) => {
   if (f.cleaned.length > 300) return res.status(400).json({ error: '评论最多 300 字' });
   db.prepare('INSERT INTO comments (post_id, user_id, content, created_at) VALUES (?,?,?,?)').run(p.id, req.user.id, f.cleaned, now());
   db.prepare('UPDATE posts SET comments_count = comments_count + 1 WHERE id = ?').run(p.id);
-  if (p.user_id !== req.user.id) notify(p.user_id, 'comment', '收到新评论', `${req.user.nickname} 评论了你的搭局「${p.title}」：${f.cleaned.slice(0, 50)}`, { post_id: p.id });
+  if (p.user_id !== req.user.id) notify(p.user_id, 'comment', '收到新评论', `${req.user.nickname} 评论了你的搭局「${p.title}」：${f.cleaned.slice(0, 50)}`, { post_id: p.id }, req.user.id);
   res.json(ok({ commented: true }));
 });
 
@@ -258,7 +278,7 @@ postsRouter.post('/:id/join', requireAuth, (req, res) => {
     db.prepare('INSERT INTO joins (post_id, user_id, message, status, created_at, updated_at) VALUES (?,?,?,?,?,?)')
       .run(p.id, req.user.id, f.cleaned, 'pending', t, t);
   }
-  notify(p.user_id, 'join_request', '收到入搭申请', `${req.user.nickname} 申请加入「${p.title}」`, { post_id: p.id, join_user_id: req.user.id });
+  notify(p.user_id, 'join_request', '收到入搭申请', `${req.user.nickname} 申请加入「${p.title}」`, { post_id: p.id, join_user_id: req.user.id }, req.user.id);
   res.json(ok({ joined: true, status: 'pending' }));
 });
 

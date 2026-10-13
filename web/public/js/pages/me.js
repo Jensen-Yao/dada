@@ -96,8 +96,7 @@ App.register('me', async (el) => {
     return `
     <div class="me2-cell" data-id="${p.id}">
       <div class="me2-cover">
-        <img loading="lazy" src="${esc(coverOf(p))}" alt=""
-          onerror="this.onerror=null;this.src='/img/covers/${esc(p.category)}.svg';">
+        <img loading="lazy" src="${esc(coverOf(p))}" alt="" onerror="${UI.imgFallback(p.category)}">
         <span class="me2-cover-pill ${cls}">${st}</span>
       </div>
       <div class="me2-cell-title">${esc(p.title)}</div>

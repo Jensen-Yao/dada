@@ -9,7 +9,9 @@ App.register('conv', async (el, seg) => {
     window.__mqBound = true;
     matchMedia('(min-width:768px)').addEventListener('change', () => location.reload());
   }
-  let currentConvId = parseInt(seg[0]);
+  let currentConvId = parseInt(seg[0], 10);
+  // H9：convId 非法（#/conv/abc → NaN）不再渲染"半残可用"聊天室
+  const convIdValid = Number.isInteger(currentConvId) && currentConvId > 0;
   let other = null;
   let myId = window.__me?.id ?? API.savedUser()?.id ?? null;
 
@@ -45,6 +47,32 @@ App.register('conv', async (el, seg) => {
 
   const msgsEl = el.querySelector('#msgs');
   const input = el.querySelector('#f-msg');
+
+  // H8/H9：会话不可用（convId 非法 / 不存在 / 无权）时的错误态：
+  // 替换右侧聊天区（无输入栏、不可发送），桌面端保留左栏会话列表
+  function showConvError(sub) {
+    const pane = el.querySelector('.conv-chat-pane') || el.querySelector('.page-inner');
+    if (!pane) return;
+    pane.innerHTML = `
+    <div class="empty" style="padding-top:88px;">
+      <div class="e-icon">${UI.icon('message-circle', 44)}</div>
+      <div class="e-title">会话不存在</div>
+      <div style="font-size:13px">${UI.esc(sub || '该会话可能已结束，或你没有访问权限')}</div>
+      <div style="display:flex; gap:10px; justify-content:center; margin-top:18px;">
+        <button class="btn primary" id="cverr-chat" style="min-width:132px;">返回消息列表</button>
+        <button class="btn plain" id="cverr-square" style="min-width:110px;">返回广场</button>
+      </div>
+    </div>`;
+    pane.querySelector('#cverr-chat').onclick = () => App.navigate('#/chat');
+    pane.querySelector('#cverr-square').onclick = () => App.navigate('#/square');
+  }
+
+  // H9：convId 非法直接渲染错误页，不注册任何 WS 回调、不渲染输入栏
+  if (!convIdValid) {
+    showConvError('链接无效：会话不存在');
+    if (desktop) loadConvList();
+    return;
+  }
 
   el.querySelector('#btn-back').onclick = () => history.back();
 
@@ -132,6 +160,11 @@ App.register('conv', async (el, seg) => {
   function send() {
     const text = input.value.trim();
     if (!text) return;
+    // H9：发送前校验 convId 有效性；失败只提示、不清空输入框（原"先清空再等确认"会丢字）
+    if (!(Number.isInteger(currentConvId) && currentConvId > 0)) {
+      UI.toast('会话不存在，无法发送');
+      return;
+    }
     if (!WS.sendChat(currentConvId, text)) {
       UI.toast('连接已断开，正在重连…');
       WS.connect();
@@ -144,6 +177,8 @@ App.register('conv', async (el, seg) => {
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
 
   // 接收实时消息
+  // H1：改用页级 App.onCleanup 卸载（DOMNodeRemoved 在 Chrome 对 innerHTML 替换不派发，
+  // 原方案导致 WS 回调永不卸载、错误 toast 随访问次数叠加、死 handler 重复请求）
   const onMsg = (payload) => {
     if (payload.message?.conv_id !== currentConvId) return;
     const nearBottom = msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 120;
@@ -151,10 +186,7 @@ App.register('conv', async (el, seg) => {
     if (nearBottom) scrollBottom();
     App.refreshBadges();
   };
-  WS.on('chat', onMsg);
   const onErr = (payload) => { if (payload.error) UI.toast(payload.error); };
-  WS.on('chat_error', onErr);
-  el.addEventListener('DOMNodeRemoved', () => { WS.off('chat', onMsg); WS.off('chat_error', onErr); }, { once: true });
 
   // 举报/拉黑菜单
   el.querySelector('#btn-more').onclick = () => {
@@ -193,6 +225,17 @@ App.register('conv', async (el, seg) => {
     });
   }
 
-  await loadConv(currentConvId);
+  try {
+    await loadConv(currentConvId);
+  } catch (err) {
+    // H8：会话不存在/无权 → 右侧友好错误页（保留返回按钮），桌面端保留左栏列表
+    showConvError(err.message);
+    if (desktop) await loadConvList();
+    return;
+  }
+  // 会话加载成功后才挂 WS 回调，并注册页级卸载
+  WS.on('chat', onMsg);
+  WS.on('chat_error', onErr);
+  App.onCleanup(() => { WS.off('chat', onMsg); WS.off('chat_error', onErr); });
   if (desktop) loadConvList();
 });

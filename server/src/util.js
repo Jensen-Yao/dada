@@ -126,7 +126,10 @@ export function filterContent(text) {
 }
 
 // ---------- 通知 ----------
-export function notify(userId, type, title, body = '', data = {}) {
+// operatorId：触发通知的操作者（点赞/评论/申请等用户行为）。
+// 接收方与操作者存在拉黑关系（双向任一）时不投递，避免拉黑后仍被骚扰（H2）。
+export function notify(userId, type, title, body = '', data = {}, operatorId = null) {
+  if (operatorId && operatorId !== userId && anyBlocked(userId, operatorId)) return;
   db.prepare(
     'INSERT INTO notifications (user_id, type, title, body, data, created_at) VALUES (?,?,?,?,?,?)'
   ).run(userId, type, title, body, JSON.stringify(data), now());

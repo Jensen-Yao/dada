@@ -27,7 +27,7 @@ App.register('edit-profile', async (el) => {
     </div>
     <div class="form-item"><label>出生年份</label><input id="f-birth" class="input" type="number" placeholder="如 2000" value="${me.age ? new Date().getFullYear() - me.age : ''}"></div>
     <div class="form-item"><label>城市</label><input id="f-city" class="input" value="${UI.esc(me.city || '')}" placeholder="如 北京"></div>
-    <div class="form-item"><label>学校 / 职业</label><input id="f-occ" class="input" value="${UI.esc(me.school || me.occupation || '')}" placeholder="如 北京大学 / 产品经理"></div>
+    <div class="form-item"><label>学校 / 职业</label><input id="f-occ" class="input" maxlength="60" value="${UI.esc(me.school || me.occupation || '')}" placeholder="如 北京大学 / 产品经理"></div>
     <div class="form-item"><label>MBTI</label>
       <select id="f-mbti" class="select">
         <option value="">不填</option>
@@ -35,7 +35,7 @@ App.register('edit-profile', async (el) => {
           .map((m) => `<option value="${m}" ${me.mbti === m ? 'selected' : ''}>${m}</option>`).join('')}
       </select>
     </div>
-    <div class="form-item"><label>个性签名</label><textarea id="f-bio" class="textarea" maxlength="200" placeholder="一句话介绍自己，让搭子更快了解你">${UI.esc(me.bio || '')}</textarea></div>
+    <div class="form-item"><label>个性签名</label><textarea id="f-bio" class="textarea" maxlength="200" placeholder="一句话介绍自己，让搭子更快了解你">${UI.esc(me.bio || '')}</textarea><div id="bio-count" style="text-align:right; font-size:11px; color:var(--text-3); margin-top:2px;"></div></div>
     <div class="form-item">
       <label>兴趣标签（点击切换）</label>
       <div id="tag-pick" style="display:flex; flex-wrap:wrap; gap:0;">
@@ -47,6 +47,13 @@ App.register('edit-profile', async (el) => {
   </div>`;
 
   const picked = new Set(me.tags || []);
+
+  // H5：签名与服务端上限（60 字）对齐，maxlength 截断 + 实时字数，不再静默吞字
+  const fBio = el.querySelector('#f-bio');
+  const bioCount = el.querySelector('#bio-count');
+  const paintBioCount = () => { bioCount.textContent = `${fBio.value.length}/200`; };
+  fBio.addEventListener('input', paintBioCount);
+  paintBioCount();
   el.querySelectorAll('[data-tag]').forEach((t) => {
     t.onclick = () => {
       const tag = t.dataset.tag;
@@ -135,7 +142,7 @@ App.register('myposts', async (el) => {
           <div class="post-meta">
             <span class="pill gray">${UI.icon('location', 11)} ${UI.esc(p.city)}</span>
             ${p.meet_time ? `<span class="pill gray">${UI.icon('clock', 11)} ${UI.esc(p.meet_time)}</span>` : ''}
-            <span class="pill gray">${type === 'published' ? `已通过 ${p.approved_count}/${p.need_count}` : ''}</span>
+            ${type === 'published' ? `<span class="pill gray">已通过 ${p.approved_count}/${p.need_count}</span>` : ''}
           </div>
         </div>
       </div>`;
