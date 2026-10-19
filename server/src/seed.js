@@ -163,6 +163,26 @@ for (const [username, idx, text] of sampleComments) {
   }
 }
 
+// ---------- 预置演示通知（幂等：按 user_id+type+body 判重） ----------
+// 1) xiaoyu 收到 runner 的入搭申请（饭搭局）；2) xiaoyu 收到 meimei 的 5 星好评；3) admin 收到 sos 演示通知（已读）
+{
+  const hoursAgo = () => t - (1 + Math.floor(Math.random() * 48)) * 3600000; // t-随机小时
+  const foodPid = pidByIndex[0]; // xiaoyu 的「五道口日料放题」饭搭局
+  const demoNotifs = [
+    [uidByUsername.xiaoyu, 'join_request', '收到入搭申请', `阿跑 申请加入「${allPosts[0][2]}」`, { post_id: foodPid, join_user_id: uidByUsername.runner }, 0],
+    [uidByUsername.xiaoyu, 'rating', '收到搭后评价', '美美 给你 5 星评价：超nice', { post_id: foodPid, stars: 5 }, 0],
+    [uidByUsername.admin, 'sos', '紧急求助', '用户 美美 发起紧急求助，请立即处理', {}, 1],
+  ];
+  let seeded = 0;
+  for (const [uid, type, title, body, data, read] of demoNotifs) {
+    if (db.prepare('SELECT 1 FROM notifications WHERE user_id = ? AND type = ? AND body = ?').get(uid, type, body)) continue;
+    db.prepare('INSERT INTO notifications (user_id, type, title, body, data, read, created_at) VALUES (?,?,?,?,?,?,?)')
+      .run(uid, type, title, body, JSON.stringify(data), read, hoursAgo());
+    seeded++;
+  }
+  if (seeded) console.log(`   预置通知已写入：xiaoyu 2 条（join_request/rating）、admin 1 条（sos 演示，已读）`);
+}
+
 console.log(`完成：${Object.keys(uidByUsername).length} 个用户，${pidByIndex.length} 条搭局`);
 console.log('   演示账号：xiaoyu / 123456（普通用户，已认证）');
 console.log('   管理账号：admin / 123456（运营后台）');

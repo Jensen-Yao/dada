@@ -88,3 +88,8 @@
 - [ ] "已拉黑"标识：BE在postView暴露block关系字段，FE在广场/详情显示对应口径
 - [ ] 发布幂等生产化：客户端 Idempotency-Key + 服务端唯一约束（当前为60秒窗口去重演示方案）
 - [ ] 满员/关闭文案与产品口径终审（FE已实现区分文案，待PM终审定稿）
+
+## v2.7 候选项（R2性能快评产出，2026-10）
+
+- [ ] 图片瘦身：封面400px缩略档（srcset/双尺寸）+ 头像64px档+补lazy → 首屏约-500KB
+- [ ] 首图 fetchpriority=high + img decoding=async（真机前保险）

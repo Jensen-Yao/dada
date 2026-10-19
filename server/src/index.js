@@ -1,6 +1,7 @@
 import express from 'express';
 import http from 'node:http';
 import cors from 'cors';
+import compression from 'compression';
 import path from 'node:path';
 import fs from 'node:fs';
 import { WebSocketServer } from 'ws';
@@ -21,6 +22,8 @@ const server = http.createServer(app);
 const PORT = parseInt(process.env.DADA_PORT || 3000);
 
 app.use(cors());
+// R2性能建议：文本资产gzip压缩（JS/CSS/JSON -70%），图片已是压缩格式跳过
+app.use(compression({ filter: (req, res) => !req.path.startsWith('/img/') && !req.path.startsWith('/uploads/') && compression.filter(req, res) }));
 app.use(express.json({ limit: '1mb' }));
 
 // 静态资源：头像上传 & 前端构建产物

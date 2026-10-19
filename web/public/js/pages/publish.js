@@ -173,8 +173,39 @@ App.register('publish', async (el) => {
       img.replaceWith(sp);
     };
   });
+  // 上传前 canvas 压缩（H5-09）：>500KB 的图缩到长边≤1200 的 JPEG(q=0.75)再上传；
+  // 解码/编码失败或压完反而更大时回退原图，不阻塞发布流程
+  async function compressImage(file) {
+    const LIMIT = 500 * 1024;
+    if (file.size <= LIMIT) return file;
+    try {
+      const bitmap = await createImageBitmap(file);
+      const scale = Math.min(1, 1200 / Math.max(bitmap.width, bitmap.height));
+      const w = Math.max(1, Math.round(bitmap.width * scale));
+      const h = Math.max(1, Math.round(bitmap.height * scale));
+      const cv = document.createElement('canvas');
+      cv.width = w;
+      cv.height = h;
+      cv.getContext('2d').drawImage(bitmap, 0, 0, w, h);
+      bitmap.close();
+      const blob = await new Promise((resolve) => cv.toBlob(resolve, 'image/jpeg', 0.75));
+      if (!blob || blob.size >= file.size) {
+        console.debug(`[publish] 配图压缩未减小体积（${(file.size / 1024).toFixed(0)}KB），使用原图`);
+        return file;
+      }
+      console.debug(`[publish] 配图压缩：${(file.size / 1024).toFixed(0)}KB → ${(blob.size / 1024).toFixed(0)}KB`);
+      return new File([blob], `${file.name || 'photo'}.jpg`, { type: 'image/jpeg', lastModified: Date.now() });
+    } catch (err) {
+      console.debug('[publish] 配图压缩失败，使用原图', err);
+      return file;
+    }
+  }
+
   async function uploadImages(pid) {
     if (!pickedFiles.length) return;
+    for (let i = 0; i < pickedFiles.length; i++) {
+      pickedFiles[i] = await compressImage(pickedFiles[i]);
+    }
     const fd = new FormData();
     for (const f of pickedFiles) fd.append('images', f);
     await fetch(`/api/posts/${pid}/images`, {

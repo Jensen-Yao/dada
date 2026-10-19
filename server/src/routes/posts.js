@@ -32,7 +32,7 @@ export function coverFields(p) {
 
 // ---------- 搭局配图上传 ----------
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const UPLOAD_DIR = path.join(__dirname, '..', 'data', 'uploads');
+const UPLOAD_DIR = path.join(__dirname, '..', '..', 'data', 'uploads');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 const imageUpload = multer({
   storage: multer.diskStorage({
@@ -63,6 +63,11 @@ function postView(p, viewer) {
   const liked = viewer ? !!db.prepare('SELECT 1 FROM likes WHERE user_id = ? AND post_id = ?').get(viewer.id, p.id) : false;
   const myJoin = viewer ? db.prepare('SELECT status FROM joins WHERE post_id = ? AND user_id = ?').get(p.id, viewer.id) : null;
   const approved = db.prepare("SELECT COUNT(*) c FROM joins WHERE post_id = ? AND status = 'approved'").get(p.id).c;
+  // 拉黑关系字段（R1延期项）：登录视角标记"我是否拉黑了帖主"，游客恒 false
+  // feed 已在登录视角过滤被拉黑帖，此字段主要用于详情页直链访问与"已拉黑"标识口径
+  const blockedByMe = viewer
+    ? !!db.prepare('SELECT 1 FROM blocks WHERE blocker_id = ? AND blocked_id = ?').get(viewer.id, p.user_id)
+    : false;
   return {
     id: p.id,
     author: publicUser(author),
@@ -91,6 +96,7 @@ function postView(p, viewer) {
     liked,
     my_join: myJoin ? myJoin.status : null,
     is_author: viewer ? viewer.id === p.user_id : false,
+    blocked_by_me: blockedByMe,
   };
 }
 
@@ -119,7 +125,8 @@ postsRouter.get('/', optionalAuth, (req, res) => {
     SELECT p.* FROM posts p WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT ? OFFSET ?
   `).all(...vals, s, off);
   const total = db.prepare(`SELECT COUNT(*) c FROM posts p WHERE ${where.join(' AND ')}`).get(...vals).c;
-  res.json(ok({ list: rows.map((r) => postView(r, req.user)), total, page: p, size: s }));
+  // 分页元信息（前端触底加载）：offset + 本页条数 < total 即还有下一页
+  res.json(ok({ list: rows.map((r) => postView(r, req.user)), total, page: p, size: s, has_more: off + rows.length < total }));
 });
 
 // ---------- 发布搭局 ----------
@@ -212,6 +219,8 @@ postsRouter.put('/:id', requireAuth, (req, res) => {
 postsRouter.post('/:id/like', requireAuth, (req, res) => {
   const p = db.prepare('SELECT * FROM posts WHERE id = ?').get(parseInt(req.params.id));
   if (!p) return res.status(404).json({ error: '搭局不存在' });
+  // 拉黑动作级拦截（R1延期项）：与帖主存在拉黑关系（双向任一）时禁止互动
+  if (anyBlocked(req.user.id, p.user_id)) return res.status(403).json({ error: '无法与该用户互动' });
   const exist = db.prepare('SELECT 1 FROM likes WHERE user_id = ? AND post_id = ?').get(req.user.id, p.id);
   if (exist) {
     db.prepare('DELETE FROM likes WHERE user_id = ? AND post_id = ?').run(req.user.id, p.id);
@@ -247,6 +256,8 @@ postsRouter.get('/:id/comments', optionalAuth, (req, res) => {
 postsRouter.post('/:id/comments', requireAuth, (req, res) => {
   const p = db.prepare('SELECT * FROM posts WHERE id = ?').get(parseInt(req.params.id));
   if (!p) return res.status(404).json({ error: '搭局不存在' });
+  // 拉黑动作级拦截（R1延期项）：与帖主存在拉黑关系（双向任一）时禁止评论
+  if (anyBlocked(req.user.id, p.user_id)) return res.status(403).json({ error: '无法与该用户互动' });
   const f = filterContent(String((req.body || {}).content || '').trim());
   if (!f.cleaned) return res.status(400).json({ error: '评论不能为空' });
   if (f.hits.length) return res.status(400).json({ error: '评论包含违规信息，请修改' });
@@ -261,6 +272,8 @@ postsRouter.post('/:id/comments', requireAuth, (req, res) => {
 postsRouter.post('/:id/join', requireAuth, (req, res) => {
   const p = db.prepare('SELECT * FROM posts WHERE id = ?').get(parseInt(req.params.id));
   if (!p) return res.status(404).json({ error: '搭局不存在' });
+  // 拉黑动作级拦截（R1延期项）：与帖主存在拉黑关系（双向任一）时禁止申请
+  if (anyBlocked(req.user.id, p.user_id)) return res.status(403).json({ error: '无法与该用户互动' });
   if (p.status !== 'open') return res.status(400).json({ error: '该搭局已停止招募' });
   if (p.user_id === req.user.id) return res.status(400).json({ error: '不能加入自己发布的搭局' });
   const exist = db.prepare('SELECT * FROM joins WHERE post_id = ? AND user_id = ?').get(p.id, req.user.id);

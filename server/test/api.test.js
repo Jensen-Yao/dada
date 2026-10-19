@@ -675,9 +675,10 @@ test('拉黑落地：feed/评论/推荐过滤 + 点赞通知静默', async () =>
   // ③ 推荐接口同样过滤（D 视角无 E 的帖）
   const rec = await api('GET', '/api/recommend?city=北京', null, tokenD);
   assert.equal(rec.json.data.list.some((p) => p.author.id === userIdE), false, 'recommend filters blocked author');
-  // ④ E 给 D 的帖点赞 → D 不再收到点赞通知
+  // ④（R1动作级拦截）E 给 D 的帖点赞 → 直接 403，D 自然不会收到点赞通知
   const like = await api('POST', `/api/posts/${pidD}/like`, {}, tokenE);
-  assert.equal(like.status, 200);
+  assert.equal(like.status, 403, 'blocked pair like should be rejected at action level');
+  assert.equal(like.json.error, '无法与该用户互动');
   const notifs = await api('GET', '/api/notifications', null, tokenD);
   assert.equal(
     notifs.json.data.some((n) => n.type === 'like' && n.body.includes('测试戊')),
@@ -720,6 +721,93 @@ test('发布幂等：同用户短窗口同标题同内容重复提交只落一�
   const r3 = await api('POST', '/api/posts', payload, tokenE);
   assert.equal(r3.status, 200);
   assert.notEqual(r3.json.data.id, r1.json.data.id, 'same title from another user creates a new post');
+});
+
+// ==================================================================
+// 本轮迭代：拉黑动作级拦截（R1延期项）/ blocked_by_me 字段 / feed has_more
+// ==================================================================
+
+test('拉黑动作级拦截：先拉黑再点赞/评论/申请均403（双向）', async () => {
+  // D 发一局
+  const created = await api('POST', '/api/posts', {
+    category: 'food', title: 'R1拦截测试局', content: 'x', city: '北京', need_count: 2,
+  }, tokenD);
+  assert.equal(created.status, 200);
+  const pid = created.json.data.id;
+  // 正向：E 拉黑 D 后，E 对 D 的帖 点赞/评论/申请 全部 403
+  const blk = await api('POST', `/api/users/${userIdD}/block`, {}, tokenE);
+  assert.equal(blk.status, 200);
+  const like = await api('POST', `/api/posts/${pid}/like`, {}, tokenE);
+  assert.equal(like.status, 403, 'like after block should be 403');
+  assert.equal(like.json.error, '无法与该用户互动');
+  const cm = await api('POST', `/api/posts/${pid}/comments`, { content: '拉黑后还想评论' }, tokenE);
+  assert.equal(cm.status, 403, 'comment after block should be 403');
+  assert.equal(cm.json.error, '无法与该用户互动');
+  const jn = await api('POST', `/api/posts/${pid}/join`, { message: '拉黑后还想申请' }, tokenE);
+  assert.equal(jn.status, 403, 'join after block should be 403');
+  assert.equal(jn.json.error, '无法与该用户互动');
+  // 未产生点赞/评论/申请副作用
+  const detail = await api('GET', `/api/posts/${pid}`, null, tokenE);
+  assert.equal(detail.json.data.likes_count, 0, 'no like persisted');
+  assert.equal(detail.json.data.comments_count, 0, 'no comment persisted');
+  assert.equal(detail.json.data.my_join, null, 'no join record persisted');
+  const cms = await api('GET', `/api/posts/${pid}/comments`);
+  assert.equal(cms.json.data.some((x) => x.content === '拉黑后还想评论'), false, 'no comment persisted');
+  await api('DELETE', `/api/users/${userIdD}/block`, null, tokenE);
+  // 反向：D 拉黑 E 后，E 对 D 的帖点赞同样 403（anyBlocked 双向任一）
+  await api('POST', `/api/users/${userIdE}/block`, {}, tokenD);
+  const like2 = await api('POST', `/api/posts/${pid}/like`, {}, tokenE);
+  assert.equal(like2.status, 403, 'reverse-direction block also rejects like');
+  assert.equal(like2.json.error, '无法与该用户互动');
+  // 解除拉黑后点赞恢复正常
+  await api('DELETE', `/api/users/${userIdE}/block`, null, tokenD);
+  const like3 = await api('POST', `/api/posts/${pid}/like`, {}, tokenE);
+  assert.equal(like3.status, 200, 'like succeeds after unblock');
+  assert.equal(like3.json.data.liked, true);
+});
+
+test('拉黑关系字段：postView 与用户主页 blocked_by_me 拉黑前后 true/false', async () => {
+  const mine = await api('GET', '/api/my/posts/published', null, tokenD);
+  const pid = mine.json.data.find((p) => p.title === 'R1拦截测试局').id;
+  // 拉黑前：登录视角 false；游客恒 false
+  const before = await api('GET', `/api/posts/${pid}`, null, tokenE);
+  assert.equal(before.status, 200);
+  assert.equal(before.json.data.blocked_by_me, false, 'blocked_by_me=false before block (logged-in)');
+  const guest = await api('GET', `/api/posts/${pid}`);
+  assert.equal(guest.json.data.blocked_by_me, false, 'guest always false');
+  // 用户主页拉黑前 false
+  const ub = await api('GET', `/api/users/${userIdD}`, null, tokenE);
+  assert.equal(ub.json.data.blocked_by_me, false, 'user profile blocked_by_me=false before block');
+  // 拉黑后：帖子详情（直链）与用户主页均 true
+  await api('POST', `/api/users/${userIdD}/block`, {}, tokenE);
+  const after = await api('GET', `/api/posts/${pid}`, null, tokenE);
+  assert.equal(after.json.data.blocked_by_me, true, 'blocked_by_me=true after block (post detail)');
+  const ua = await api('GET', `/api/users/${userIdD}`, null, tokenE);
+  assert.equal(ua.json.data.blocked_by_me, true, 'user profile blocked_by_me=true after block');
+  // 游客依旧 false；他人视角（D 自己看自己的帖）false
+  const guest2 = await api('GET', `/api/posts/${pid}`);
+  assert.equal(guest2.json.data.blocked_by_me, false, 'guest still false after block');
+  const self = await api('GET', `/api/posts/${pid}`, null, tokenD);
+  assert.equal(self.json.data.blocked_by_me, false, 'author viewing own post is false');
+  // 清理
+  await api('DELETE', `/api/users/${userIdD}/block`, null, tokenE);
+});
+
+test('feed分页：has_more 元信息（size=5 时 true，且与 total 关系一致）', async () => {
+  const r = await api('GET', '/api/posts?size=5');
+  assert.equal(r.status, 200);
+  const d = r.json.data;
+  assert.equal(typeof d.has_more, 'boolean', 'has_more must be boolean');
+  assert.equal(d.list.length, 5);
+  assert.ok(d.total > 5, 'seeded feed has more than 5 posts');
+  assert.equal(d.has_more, true, 'has_more=true when size=5');
+  assert.equal(d.has_more, 0 + d.list.length < d.total, 'has_more consistent with offset+len<total');
+  // 翻到足够靠后的页（每页5条，取一个必然超出 total 的页码）→ false；中间页与公式一致
+  const lastPage = Math.ceil(d.total / 5) + 2;
+  const r2 = await api('GET', `/api/posts?size=5&page=${lastPage}`);
+  assert.equal(r2.json.data.has_more, false, 'has_more=false when past the end');
+  const mid = await api('GET', '/api/posts?size=5&page=2');
+  assert.equal(mid.json.data.has_more, 5 + mid.json.data.list.length < mid.json.data.total, 'page=2 has_more follows formula');
 });
 
 console.log('\n✅ 全部 API 测试通过');

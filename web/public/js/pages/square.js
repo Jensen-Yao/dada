@@ -1,20 +1,28 @@
 /* ================= 广场页（搭局列表 · 双列瀑布流 H5-06~08） ================= */
 App.register('square', async (el, _seg, query) => {
   const meta = await App.meta();
+  // H5-09 触底加载：page 当前页码 / hasMore 还有下一页 / loadingMore 触底请求防重入
   const state = {
     city: query.get('city') || '',
     category: query.get('category') || '',
     keyword: '',
     sort: 'new',
+    page: 1,
+    hasMore: true,
+    loadingMore: false,
   };
+  const PAGE_SIZE = 10;
+  // 请求序号：筛选切换后晚到的旧响应（翻页竞态）直接丢弃
+  let fetchSeq = 0;
 
-  async function fetchList() {
+  async function fetchList(page) {
     const params = new URLSearchParams();
     if (state.city) params.set('city', state.city);
     if (state.category) params.set('category', state.category);
     if (state.keyword) params.set('keyword', state.keyword);
     if (state.sort === 'hot') params.set('sort', 'hot');
-    params.set('size', '30');
+    params.set('page', String(page));
+    params.set('size', String(PAGE_SIZE));
     return API.get('/posts?' + params.toString());
   }
 
@@ -90,21 +98,98 @@ App.register('square', async (el, _seg, query) => {
     });
   }
 
+  // H5-09 has_more 兼容口径：新后端返回 has_more；旧后端无该字段时按
+  // "本页有数据就继续翻"兜底（翻到空页自然停止），公式统一为：
+  // has_more !== false && list.length > 0
+  function calcHasMore(r) {
+    return r.has_more !== false && r.list.length > 0;
+  }
+
+  function bindCards(scope) {
+    scope.querySelectorAll('.pin-card').forEach((c) => {
+      c.onclick = () => App.navigate('#/post/' + c.dataset.id);
+    });
+  }
+
+  // 底部哨兵：既是 IntersectionObserver 触发点，也是"加载中/没有更多了"小字容器
+  function tailHTML() {
+    return `<div id="wf-tail" style="text-align:center; color:var(--text-3); font-size:12px; padding:14px 0 calc(18px + var(--safe-bottom));"></div>`;
+  }
+
+  function paintTail() {
+    const t = el.querySelector('#wf-tail');
+    if (!t) return;
+    t.innerHTML = state.loadingMore ? UI.loading('加载中...') : (state.hasMore ? '' : '没有更多了');
+  }
+
+  // 触底监听：rootMargin 提前 200px 预载；页面卸载时由 App.onCleanup 断开
+  const io = new IntersectionObserver((entries) => {
+    if (entries.some((e) => e.isIntersecting)) loadMore();
+  }, { rootMargin: '200px 0px' });
+  App.onCleanup(() => io.disconnect());
+
+  function watchTail() {
+    io.disconnect();
+    const t = el.querySelector('#wf-tail');
+    if (!t) return;
+    t.onclick = () => loadMore(); // 失败态可点击重试（成功态由 guard 拦截）
+    io.observe(t);
+  }
+
   async function refreshList() {
+    const seq = ++fetchSeq;
     const listEl = el.querySelector('#list');
+    // 任何筛选条件变化都重置分页并清空列表（走整容器重绘）
+    state.page = 1;
+    state.hasMore = true;
+    state.loadingMore = false;
     try {
-      const data = await fetchList();
+      const data = await fetchList(1);
+      if (seq !== fetchSeq) return; // 筛选已变更，丢弃过期响应
       // H5-06：筛选/分页刷新时整容器重绘（columns 下增量插入会重排列序）
       if (!data.list.length) {
+        state.hasMore = false;
         listEl.innerHTML = UI.empty('search', '这里还没有搭局', '换个城市或分类看看，或者自己发一个');
         return;
       }
-      listEl.innerHTML = `<div class="wf">${data.list.map(postCard).join('')}</div>`;
-      listEl.querySelectorAll('.pin-card').forEach((c) => {
-        c.onclick = () => App.navigate('#/post/' + c.dataset.id);
-      });
+      state.hasMore = calcHasMore(data);
+      listEl.innerHTML = `<div class="wf">${data.list.map(postCard).join('')}</div>${tailHTML()}`;
+      bindCards(listEl);
+      paintTail();
+      watchTail();
     } catch (err) {
+      state.hasMore = false;
       listEl.innerHTML = UI.empty('alert-circle', '加载失败', err.message);
+    }
+  }
+
+  // H5-09 触底追加：保持当前筛选条件 page+1 追加请求；
+  // CSS columns 瀑布流直接 append 到 .wf 尾部即可自然回流
+  async function loadMore() {
+    if (state.loadingMore || !state.hasMore) return; // 防重入
+    state.loadingMore = true;
+    const seq = fetchSeq;
+    paintTail();
+    let appended = false;
+    try {
+      const data = await fetchList(state.page + 1);
+      if (seq !== fetchSeq) return; // 筛选已变更，丢弃过期响应
+      state.page += 1;
+      if (data.list.length) {
+        const wf = el.querySelector('#list .wf');
+        if (wf) {
+          wf.insertAdjacentHTML('beforeend', data.list.map(postCard).join(''));
+          bindCards(wf);
+          appended = true;
+        }
+      }
+      state.hasMore = calcHasMore(data);
+    } catch (err) {
+      UI.toast(err.message); // 失败不推进页码；滚动离开再触底或点击底部提示重试
+    } finally {
+      state.loadingMore = false;
+      paintTail();
+      if (appended) watchTail(); // 追加后哨兵若仍在视口内（大屏），重新 observe 续载
     }
   }
 

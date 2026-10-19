@@ -27,6 +27,8 @@ App.register('post', async (el, seg) => {
   function render() {
     const p = post;
     const c = UI.creditLabel(p.author.credit);
+    // H5-09 拉黑口径：blocked_by_me 为 true 时作者区挂灰 pill、操作栏禁用（undefined 按 false 兼容旧后端）
+    const blocked = p.blocked_by_me === true;
     el.classList.add('post-page');
     const imgs = p.images || [];
     const ar = (UI.aspectOf(p) || '3:4').replace(':', ' / ');
@@ -95,14 +97,14 @@ App.register('post', async (el, seg) => {
       <div class="da-author" id="author-card">
         ${UI.avatarHTML(p.author)}
         <div class="da-author-info">
-          <span class="da-name">${UI.esc(p.author.nickname)} ${UI.genderBadge(p.author.gender)}${p.author.verify_real ? '<span class="vbadge real">真人</span>' : ''}</span>
+          <span class="da-name">${UI.esc(p.author.nickname)} ${UI.genderBadge(p.author.gender)}${p.author.verify_real ? '<span class="vbadge real">真人</span>' : ''}${blocked ? '<span class="pill gray">已拉黑</span>' : ''}</span>
           <span class="pill ${c.cls} da-credit" style="align-self:flex-start;">${c.text}</span>
         </div>
       </div>
-      <button class="da-act ${p.liked ? 'liked' : ''}" id="btn-like">
+      <button class="da-act ${p.liked ? 'liked' : ''}" id="btn-like" ${blocked ? 'disabled' : ''}>
         ${UI.icon(p.liked ? 'heartFill' : 'heart', 22)}<span>${p.likes_count}</span>
       </button>
-      <button class="da-act" id="btn-comment-jump">
+      <button class="da-act" id="btn-comment-jump" ${blocked ? 'disabled' : ''}>
         ${UI.icon('comment', 22)}<span>${p.comments_count}</span>
       </button>
       <button class="btn ${joinBtnClass()} sm da-cta" id="btn-join" ${joinDisabled() ? 'disabled' : ''}>${joinBtnText()}</button>
@@ -152,11 +154,12 @@ App.register('post', async (el, seg) => {
     return 'primary';
   }
 
-  // 主按钮不可操作态（组局者视角/非招募中/已申请）时置灰
+  // 主按钮不可操作态（组局者视角/非招募中/已申请/已拉黑作者）时置灰
   function joinDisabled() {
     const p = post;
     if (!API.isLogin()) return false;
     if (p.is_author) return true;
+    if (p.blocked_by_me === true) return true; // H5-09：已拉黑作者，不可申请
     if (p.my_join === 'pending') return true;
     if (p.status === 'full') return false; // H7：满员可点击 → 跳广场
     if (p.status !== 'open') return true;  // closed/done/expired：灰置不可点

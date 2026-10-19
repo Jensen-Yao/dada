@@ -4,11 +4,11 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { db, now } from '../db.js';
-import { requireAuth, ok, publicUser, notify, addCredit, anyBlocked, safeJSON } from '../util.js';
+import { requireAuth, optionalAuth, ok, publicUser, notify, addCredit, anyBlocked, safeJSON } from '../util.js';
 
 export const usersRouter = Router();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const UPLOAD_DIR = path.join(__dirname, '..', 'data', 'uploads');
+const UPLOAD_DIR = path.join(__dirname, '..', '..', 'data', 'uploads');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 const upload = multer({
@@ -24,7 +24,7 @@ const upload = multer({
 });
 
 // ---------- 他人主页 ----------
-usersRouter.get('/:id', (req, res) => {
+usersRouter.get('/:id', optionalAuth, (req, res) => {
   const u = db.prepare('SELECT * FROM users WHERE id = ?').get(parseInt(req.params.id));
   if (!u || u.status === 'banned') return res.status(404).json({ error: '用户不存在' });
   const pu = publicUser(u);
@@ -39,6 +39,10 @@ usersRouter.get('/:id', (req, res) => {
     SELECT p.id, p.title, p.category, p.meet_time FROM posts p
     WHERE p.user_id = ? AND p.status = 'done' ORDER BY p.id DESC LIMIT 5
   `).all(u.id);
+  // 拉黑关系字段（R1延期项）：登录视角标记"我是否拉黑了 TA"，用于用户主页"已拉黑"标识，游客恒 false
+  pu.blocked_by_me = req.user
+    ? !!db.prepare('SELECT 1 FROM blocks WHERE blocker_id = ? AND blocked_id = ?').get(req.user.id, u.id)
+    : false;
   res.json(ok(pu));
 });
 
