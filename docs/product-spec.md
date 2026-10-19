@@ -1016,3 +1016,133 @@ match_score = round( 100 × Σ(wᵢ × sᵢ) / Σ(wᵢ) )   // 只累加"可用�
 - [ ] `rec_off` 用户行为不回退（空列表+提示条）
 - [ ] MBTI 矩阵抽查：INTJ×ENFP=100%（四维全优）、INTJ×INTP=80%、INTJ×ISTJ=55%（N/S 错配）
 - [ ] 全站无 emoji 回归 + `npm test` 全绿
+
+---
+
+## I. v3.0 多维洞察落地
+
+> 版本：v3.0 ｜ 日期：2026-10-20 ｜ 输入：`docs/insights/` 六份报告（vc/market/social/soul/dy/xhs）
+> 取舍原则：只选 **价值高 × 成本≤2人日 × 不动架构** 的项，合计 **≈10人日**；其余进 roadmap v3.1+。
+> 延续硬约束 C1-C5：零构建、功能不回退、API 只增不改、零外部服务、兼容旧数据；G 章"零 emoji"红线继续生效。
+
+### I.0 选型逻辑（一句话版）
+
+VC 的判词是"不会死于烧钱，会死于数据盲区"——**VD-01 埋点是本轮第一件事**；Social 指出"搭完即止是合法终点，但产品没给关系容器"——**VD-02/03/04 组成搭后关系闭环**；Soul/dy/xhs 各取一个 ≤1.5 人日的转化与体验快赢（VD-05~08）。
+
+---
+
+### I.1 功能规格
+
+#### VD-01 事件埋点 + 成搭漏斗看板（来源：vc §三/§四-1；成本 2 人日）
+
+- **价值**：补上"一行埋点都没有"的第一技术债，六级成搭漏斗（浏览→申请→通过→done→互评→复约）成为后续一切运营与融资叙事的地基；每过一天不埋就永久销毁一天数据。
+- **实现要点**：
+  - BE `server/src/db.js`：幂等 `CREATE TABLE IF NOT EXISTS events(id, kind, user_id, post_id, meta, ts)` + `idx(kind, ts)`；游客 user_id 为 NULL。
+  - BE `server/src/util.js`：新增 `trackEvent(kind, userId, postId, meta)` helper。
+  - BE 埋点位置（全部现有路由内加一行，不改响应）：`posts.js` 帖子详情 GET→`view`；POST /join→`apply`；审批→`approve/reject`；标 done→`complete`；互评提交（posts.js:366）→`rate`（meta 含 stars）；`chat.js` 首条私信→`first_msg`、done 后再发消息→`reactivate_chat`；`safety.js` 拉黑/SOS/举报→`guardrail`（女性护栏指标数据源）。
+  - BE `admin.js /stats`：新增 `funnel` 字段（六级别 SQL）+ WPU（周成搭用户数）、互评率、供给新鲜度（近 7 天 open 帖占比）、搭后复约率（同一 user 对出现于 ≥2 个 post_id 的 ratings 对数）；存量 count 字段保留不删（C3）。
+  - FE `web/public/js/pages/admin.js`：看板新增"成搭漏斗"区块，横条图 + 六级转化率 + 三个比率卡。
+- **验收标准**：①浏览/申请/通过/done/互评/举报各触发一次后 events 表有对应 kind 行；②admin 看板显示六级漏斗且各级人数单调不增（复约除外单列）；③WPU/互评率/新鲜度三个数字可见；④`npm test` 全绿，既有接口响应结构不变。
+
+#### VD-02 搭局自动过期 + 搭后提醒定时任务（来源：vc §四-2/3 + social §四-3；成本 1.5 人日）
+
+- **价值**：schema 里 `expired` 状态从不被设置，僵尸 open 帖让供给新鲜度失真；复约提醒直接抬北极星（WPU）与复约率，"场景重现时的可想起性"是搭子复购的决定性瞬间。
+- **实现要点**：
+  - BE 新增 `server/src/jobs.js`（`setInterval` 每小时，复用 index.js:136 的 `.unref()` 模式，不动架构）：
+    1. `meet_time < now-48h` 且 `status='open'` → 置 `expired` + `notify()` 组局者"标记完成或关闭"；
+    2. 局 `done` 后 72h 仍有参与者未互评 → `notify()` 提醒互评（互评是信用飞轮入口）；
+    3. 老搭子定向推送：ratings 中同 user 对历史互评 ≥4 星的一方发新 open 帖 → `notify()` 另一方"你的搭子又组局了：{title}"。频率上限：每接收者每日 ≤2 条，防打扰。
+  - 涉及文件：`server/src/jobs.js`（新增）、`server/src/index.js`（import + 启动一行）。
+- **验收标准**：①造一条 meet_time 超 48h 的 open 帖，跑一轮 job 后 status 变 `expired` 且组局者收到通知；②done+72h 未互评用户收到评价提醒且不重复发（幂等：kv 表记已提醒标记）；③老搭子新局触发定向推送、非老搭子不触发、每日上限生效；④job 单轮执行 <1s，失败不 crash 主进程。
+
+#### VD-03 搭后关系走向三选一 + 搭友列表（来源：social §四-1 + soul §三；成本 1.5 人日）
+
+- **价值**：填补生命周期最大空白——互评后关系悬空；"到此为止"把搭完即止合法化（静默归档），"存为搭友"成为微信好友的轻量站内替身，直接反微信黑洞。
+- **实现要点**：
+  - BE `db.js`：新表 `partners(user_id, partner_id, first_post_id, times, created_at, UNIQUE(user_id, partner_id))`。
+  - BE `posts.js`：互评提交成功响应新增 `relationship_prompt: true`；新增 `POST /posts/:id/relationship {choice}`：`end`→仅记录不通知（静默）；`save`→双向 upsert partners（times+1）；`again`→返回原帖 title/content/category/city 骨架 JSON。
+  - FE `post.js`/`conv.js`（互评提交处）：弹一次性三选一 sheet（UI.sheet，文案：再约一次 / 存为搭友 / 到此为止；"到此为止"副注"对方不会收到通知"）。
+  - FE `publish.js`：进入时读 `localStorage.dada_repost_payload`（三选一"再约"写入）预填表单，保存/清除一次即焚。
+  - FE `me.js` + `user.js`：新增"搭友"Tab（BE `users.js` 新增 `GET /users/:id/partners`，含 nickname/avatar/times/最近共同搭局）。
+- **验收标准**：①互评后必弹三选一，选后同局不再弹；②"存为搭友"后双方搭友列表互见且 times 正确累加；③"再约"跳发布页字段预填、提交成功后 payload 清除；④"到此为止"对方 notifications 无任何新增；⑤拉黑用户不出现在搭友列表。
+
+#### VD-04 老搭子匹配加权（来源：soul §四-2；成本 1 人日）
+
+- **价值**：把"搭过"这一线下真实见过面的强信任信号回流到匹配——老搭子推荐成功率远高于冷匹配，站内有人等你即天然对抗微信黑洞。
+- **实现要点**：
+  - BE `misc.js /for-you`：matchScore 输出**后置加分** `score = min(100, score + 10 × min(times, 3))`（times 来自 partners 表），reasons 首位前插「老搭子×N」；响应新增 `partner_times` 字段。**严禁改 `match.js` 的 WEIGHTS**——保住 MT-05-2 的 Σ=100 确定性契约（六维评分纯函数不动，加分在路由层做）。
+  - FE `discover.js`：作者行渲染「老搭子×N」角标（复用 .pill 样式，N≤3）。
+- **验收标准**：①`match.js` 零改动，WEIGHTS Σ=100 断言仍绿；②有 partners 记录（times=2）的用户 /for-you 该作者帖 score 恰好 +20（未 clamp 时）且 reasons 含「老搭子×2」；③无搭友用户行为与 v2.9 完全一致（回归）；④加分封顶 100 不越界。
+
+#### VD-05 破冰话题卡 + 申请留言建议（来源：soul §一/§四-1 + social §三；成本 1 人日）
+
+- **价值**：搭搭私信门槛高（先同局才可聊），每一句开场都珍贵——直击"首条消息不知道说啥"，预期申请通过率与首日消息率双升；i 人破冰刚需。
+- **实现要点**：
+  - FE 新增 `web/public/js/topics.js`：按 14 分类 × 通用场景的话题模板常量（30 条起步），规则 = 双方 tags 交集 × 会话关联 post 分类。
+  - FE `conv.js`：会话消息 ≤2 条时在输入框上方渲染 2-3 张话题卡，点击填入输入框；发出第 3 条消息后话题卡沉底不再展示。
+  - FE `post.js`：申请框上方给 3 条一句话留言模板（按 title/category 规则生成，如"也想去这条路线，我周末都空"），点击填入。
+  - BE `chat.js` conv 详情：`other` 补 `tags` 字段、响应补关联 post 的 `category`（只增字段，C3 兼容）。
+- **验收标准**：①空会话见 2-3 张与该局分类匹配的话题卡，点击即填入；②消息 ≥3 条后话题卡消失；③申请面板 3 条模板与帖子分类对应；④topics.js 为纯常量文件，零后端逻辑依赖，零 emoji。
+
+#### VD-06 消息级快捷举报（来源：soul §四-4；成本 0.5 人日）
+
+- **价值**：现有举报藏在"···"菜单第 3 层且不带消息证据，人工核实只能翻库；快捷举报让骚扰话术 30 秒内完成取证——女性安全场景的体感关键。
+- **实现要点**：
+  - FE `conv.js`：气泡长按（移动端）/hover（桌面）浮出"举报此条"操作，直达现有 `POST /users/:id/report`，detail 携带 `conv_id + message_id + 消息内容快照`。
+  - BE `users.js`：report 接口已支持 detail 字段（L176-186），仅透传，无 schema 改动；`admin.js` 举报队列详情弹层展示 detail 证据（FE `admin.js`）。
+- **验收标准**：①长按/hover 气泡出现举报入口，点击 3 秒内提交成功；②举报落库 detail 含 conv_id/message_id/内容快照三要素；③admin 举报队列可直接看到证据无需查库；④举报自己消息被拒绝；⑤既有"···"菜单举报入口不回退。
+
+#### VD-07 消息已读回执（来源：dy §二/§四-1；成本 1 人日）
+
+- **价值**：找搭子是强时效撮合，"对方看了没回"是核心焦虑——`messages.read_at` 列与写入逻辑（chat.js:80）均已就绪，只差回传与展示，半天后端零 schema 变更。
+- **实现要点**：
+  - BE `chat.js`：`GET /chat/conv/:id/messages` 每条回传 `read_at`；对方打开会话（触发 L80 批量置读）时经 WS 广播 `peer_read {conv_id, up_to_msg_id}` 给发送方。
+  - FE `conv.js`：仅自己发送的最后一条气泡下方渲染 10px 灰字"已读/送达"，收到 peer_read 事件原地更新，不重绘整个列表。
+- **验收标准**：①发送方在对方未读时见"送达"，对方进入会话后 2 秒内变"已读"（WS 实时，无需刷新）；②历史消息 read_at 正确回传；③断线重连后状态不错乱（以接口 read_at 为准兜底）；④`messages` 表零 schema 变更，23 个既有测试全绿。
+
+#### VD-08 附近搭局 tab（城市粒度）（来源：dy §一/§四-2；成本 1.5 人日）
+
+- **价值**：距离是搭子第一决策因子（饭搭/运动搭半径常 <5km）；`GET /posts` 的 `city` 参数与 `idx_posts_city` 索引均现成，补上最大的一块板且零后端改造。
+- **实现要点**：
+  - FE `square.js`：顶部新增"推荐 / 附近"tab；附近 = `GET /posts?city={city}&sort=hot`，卡片角标展示 `location_name`（"朝阳大悦城"比"3.2km"更具体）。
+  - FE 城市切换器：登录态默认 profile city、可手切，存 `localStorage.dada_city`（7 天）；游客默认"北京"可切。分类 chips 与附近 tab 可叠加（category+city 双过滤）。
+  - 本期**不做**精确定位/坐标/haversine（P2/P3 进 roadmap，待数据验证用户真在意距离）。
+- **验收标准**：①切到附近后列表所有帖 city 与所选城市一致（抽 20 条）；②城市选择持久化，重进保持；③游客可用、无需登录；④推荐/附近切换不丢分类与搜索状态；⑤空城市显示空态文案"这座城市还没有搭局，发一个试试"。
+
+---
+
+### I.2 排期表（FE-A / FE-B / BE 并行，合计 ≈10 人日）
+
+| # | BE 任务 | 工作量 | 依赖 | # | FE 任务 | 工作量 | 依赖 |
+|---|---|---|---|---|---|---|---|
+| BE-1 | events 表 + trackEvent + 7 处埋点 + /stats 漏斗与比率 | 1.5d | 无 | FE-1 | admin.js 成搭漏斗看板区块 | 0.5d | BE-1 |
+| BE-2 | jobs.js：过期 / 72h 互评提醒 / 老搭子定向推送 | 1d | 无 | FE-2 | conv.js 话题卡 + post.js 留言模板 + topics.js | 1d | BE-6 |
+| BE-3 | partners 表 + relationship 接口 + /users/:id/partners | 0.5d | 无 | FE-3 | 三选一 sheet + publish 再约预填 + 搭友 Tab | 1d | BE-3 |
+| BE-4 | /for-you 老搭子后置加分 + partner_times | 0.5d | BE-3 | FE-4 | discover.js 老搭子角标 | 0.25d | BE-4 |
+| BE-5 | messages 回传 read_at + WS peer_read | 0.5d | 无 | FE-5 | conv.js 气泡快捷举报 + admin 证据展示 | 0.75d | 无（detail 已透传） |
+| BE-6 | chat.js conv 详情补 other.tags / post.category | 0.25d | 无 | FE-6 | conv.js 已读/送达渲染 + peer_read 监听 | 0.5d | BE-5 |
+| — | — | — | — | FE-7 | square.js 附近 tab + 城市切换器 | 1.5d | 无（city 参数现成） |
+
+> 关键路径：BE-3 → BE-4 → FE-4（老搭子链最长，先启动）；FE-5/FE-7 与 BE-1 无依赖，可立即并行。测试：`test/api.test.js` 追加 VD-01（埋点落库）/VD-03（relationship 三分支）/VD-04（加分 clamp 与 Σ=100 回归）/VD-07（read_at 回传）四组用例。
+
+### I.3 明确排除项（→ roadmap v3.1+，一句话理由）
+
+| 项 | 排除理由 |
+|---|---|
+| 话题 tag 系统（xhs-2） | 动 schema+seed+全链路测试 2-3 天，超单项成本线 → v3.1（搜索与分类偏好的公共地基，届时优先） |
+| 详情页相关搭局推荐（xhs-1） | 价值认可但预算封顶 → v3.1 候补第 1 位（1 天纯前端） |
+| 发布场景模板（xhs-3） | 0.5 天高性价比 → v3.1 候补第 2 位随手带上 |
+| 搜索历史+热搜（xhs-4） | 依赖话题 tag 地基更划算 → v3.1 |
+| 收藏信号+热度权重修正（xhs-5） | 新表+改热度公式影响推荐链路 → v3.1 |
+| 行为风控：申请频控/秒发联系方式/设备指纹（soul-3） | 2 天接近单项上限且需独立回归 → v3.1（开城放量前置条件） |
+| i 人模式 ≤3 人小局（social-2） | 价值高成本低的候补第 3 位 → v3.1 |
+| 女性安全全流程徽章/报平安/位置共享（social-5） | 位置共享需 LBS 外部依赖 → v3.1 分两期（先徽章+报平安） |
+| Web Push 离线推送（dy） | 强制 HTTPS + iOS 到达率打折 → v3.1 |
+| 气泡表情回应（dy） | 锦上添花 → v3.2（与群聊一起） |
+| 高校认证（market-1） | 人工审核运营流程重于代码 → v3.1 随校园冷启动 |
+| 城市运营位/开城开关（market-2） | 需运营流程配套 → v3.1 开城时一并 |
+| 搭局群聊（market-3） | 需群会话模型，动消息架构 → v3.2 |
+| 搭子履历分享卡（market-5） | 长图渲染需独立设计 → v3.1 获客期 |
+| 被拒后可重新申请（vc-5） | 改 joins UNIQUE 约束属 schema 语义变更，"不动架构"红线内不做 → v3.1 |
+| 会员搭搭Plus（vc §二） | 变现节奏等 VD-01 漏斗数据出来再定 → v3.1 |
+| 全屏上滑沉浸流（dy §三） | 抖音专家已判定不适合高决策搭局场景 → 永久排除 |

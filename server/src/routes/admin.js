@@ -29,6 +29,30 @@ adminRouter.get('/stats', (_req, res) => {
   }));
 });
 
+// ---------- 成搭漏斗看板（VD-01：六级成搭漏斗 + 日活近似） ----------
+// funnel 固定顺序：register → post_view → publish → join → approve → done → rate
+// daily_active：日活跃近似 = events 按 user 去重 / 日（UTC 日界）
+adminRouter.get('/funnel', (req, res) => {
+  const days = Math.min(90, Math.max(1, parseInt(req.query.days) || 30));
+  const since = now() - days * 86400000;
+  const FUNNEL_TYPES = ['register', 'post_view', 'publish', 'join', 'approve', 'done', 'rate'];
+  const rows = db.prepare('SELECT type, COUNT(*) c FROM events WHERE created_at >= ? GROUP BY type').all(since);
+  const byType = Object.fromEntries(rows.map((r) => [r.type, r.c]));
+  const funnel = FUNNEL_TYPES.map((type) => ({ type, count: byType[type] || 0 }));
+  // 日活近似：按日（UTC）对 events.user_id 去重计数
+  const evRows = db.prepare('SELECT user_id, created_at FROM events WHERE created_at >= ? AND user_id IS NOT NULL').all(since);
+  const byDay = new Map();
+  for (const r of evRows) {
+    const day = new Date(r.created_at).toISOString().slice(0, 10);
+    if (!byDay.has(day)) byDay.set(day, new Set());
+    byDay.get(day).add(r.user_id);
+  }
+  const daily_active = [...byDay.entries()]
+    .map(([date, users]) => ({ date, count: users.size }))
+    .sort((a, b) => (a.date < b.date ? 1 : -1));
+  res.json(ok({ days, funnel, daily_active }));
+});
+
 // ---------- 举报队列 ----------
 adminRouter.get('/reports', (req, res) => {
   const status = ['pending', 'resolved'].includes(req.query.status) ? req.query.status : 'pending';

@@ -302,6 +302,7 @@ App.register('settings', async (el) => {
   <div style="margin:14px; border-radius:16px; overflow:hidden; box-shadow:var(--shadow);">
     <div class="cell"><span class="cell-icon">${UI.icon('smartphone', 18)}</span><span class="cell-main">账号</span><span style="color:var(--text-3); font-size:13px;">${UI.esc(me.id ? '用户 #' + me.id : '')}</span></div>
     <div class="cell" id="c-safety2"><span class="cell-icon">${UI.icon('shield', 18)}</span><span class="cell-main">安全中心</span><span class="cell-arrow">›</span></div>
+    <div class="cell" id="c-partners"><span class="cell-icon">${UI.icon('people', 18)}</span><span class="cell-main">我的搭友<span class="cell-sub">互评后自动沉淀的搭子关系</span></span><span class="cell-arrow">›</span></div>
     <div class="cell" id="c-blocks"><span class="cell-icon">${UI.icon('slash', 18)}</span><span class="cell-main">黑名单</span><span class="cell-arrow">›</span></div>
     <div class="cell" id="c-rec">
       <span class="cell-icon">${UI.icon('star', 18)}</span>
@@ -318,6 +319,7 @@ App.register('settings', async (el) => {
   </div>`;
 
   el.querySelector('#c-safety2').onclick = () => App.navigate('#/safety');
+  el.querySelector('#c-partners').onclick = () => App.navigate('#/partners');
 
   // 合规：个性化推荐开关（PUT /users/me rec_off，0=开启 1=关闭）
   const swRec = el.querySelector('#sw-rec');
@@ -394,4 +396,52 @@ App.register('settings', async (el) => {
     location.hash = '#/login';
     UI.toast('已退出登录');
   };
+});
+
+/* ================= 我的搭友（VD-03 FE-3：搭后互评沉淀的搭子关系） ================= */
+App.register('partners', async (el) => {
+  el.innerHTML = `
+  <div class="navbar">
+    <div class="navbar-inner">
+      <button class="navbar-btn" onclick="history.back()">‹</button>
+      <div class="navbar-title">我的搭友</div>
+      <div style="width:34px;"></div>
+    </div>
+  </div>
+  <div class="partners-sub">完成搭局互评后自动成为搭友，可直接再约</div>
+  <div id="plist">${UI.loading()}</div>`;
+
+  const box = el.querySelector('#plist');
+  try {
+    const data = await API.get('/users/me/partners');
+    // BE 契约兼容：新后端返回 {list:[{partner:{...}, times}]}，旧/平铺形态 [{id, nickname, times}] 均可渲染
+    const list = (Array.isArray(data) ? data : data.list || []).map((r) => {
+      const u = r.partner || r;
+      return { ...u, times: r.times ?? u.times ?? 1 };
+    });
+    if (!list.length) {
+      box.innerHTML = UI.empty('people', '还没有搭友', '一起完成搭局并互评，就会出现在这里');
+      return;
+    }
+    box.innerHTML = list.map((u) => `
+      <div class="partner-row" data-id="${u.id}">
+        ${UI.avatarHTML(u)}
+        <div class="partner-info">
+          <div class="partner-name">${UI.esc(u.nickname)} ${UI.genderBadge(u.gender)}</div>
+          <div class="partner-meta">
+            <span class="pill partner-times">搭过 ${u.times || 1} 次</span>
+            ${u.verify_real ? '<span class="vbadge real">真人</span>' : ''}
+          </div>
+        </div>
+        <button class="btn plain sm" data-go="${u.id}">去主页</button>
+      </div>`).join('');
+    box.querySelectorAll('[data-go]').forEach((b) => {
+      b.onclick = (e) => { e.stopPropagation(); App.navigate('#/user/' + b.dataset.go); };
+    });
+    box.querySelectorAll('.partner-row').forEach((r) => {
+      r.onclick = () => App.navigate('#/user/' + r.dataset.id);
+    });
+  } catch (err) {
+    box.innerHTML = UI.empty('alert-circle', '加载失败', err.message);
+  }
 });

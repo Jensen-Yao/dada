@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { db, now } from '../db.js';
-import { signToken, requireAuth, ok, publicUser, safeJSON } from '../util.js';
+import { signToken, requireAuth, ok, publicUser, safeJSON, trackEvent } from '../util.js';
 
 export const authRouter = Router();
 
@@ -88,6 +88,7 @@ authRouter.post('/register', (req, res) => {
     `).run(username, hash, nick, phone, t, t);
     smsCodes.delete(phone); // 验证码一次性使用
     const user = findUser(info.lastInsertRowid);
+    trackEvent(user.id, 'register'); // VD-01 漏斗：注册
     return res.json(ok({ token: signToken(user), user: publicUser(user) }));
   }
 
@@ -113,6 +114,7 @@ authRouter.post('/register', (req, res) => {
   `).run(username, hash, String(nickname).trim(), ['male', 'female', 'secret'].includes(gender) ? gender : 'secret',
     birth_year ? parseInt(birth_year) : null, String(city || '').trim().slice(0, 60), '[]', t, t);
   const user = findUser(info.lastInsertRowid);
+  trackEvent(user.id, 'register'); // VD-01 漏斗：注册（用户名模式）
   res.json(ok({ token: signToken(user), user: publicUser(user) }));
 });
 

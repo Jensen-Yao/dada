@@ -205,6 +205,26 @@ CREATE TABLE IF NOT EXISTS kv (
   k TEXT PRIMARY KEY,
   v TEXT NOT NULL
 );
+
+-- v3.0 VD-01 事件埋点：成搭漏斗原始数据（游客 user_id 为 NULL；只增不改，C3 兼容）
+CREATE TABLE IF NOT EXISTS events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER REFERENCES users(id),
+  type TEXT NOT NULL,
+  post_id INTEGER REFERENCES posts(id),
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_events_type_time ON events(type, created_at);
+
+-- v3.0 VD-03 搭友表：搭后关系容器（id 小者存 user_a，a<b 排序保证一对用户仅一行）
+CREATE TABLE IF NOT EXISTS partners (
+  user_a INTEGER NOT NULL REFERENCES users(id),
+  user_b INTEGER NOT NULL REFERENCES users(id),
+  times INTEGER NOT NULL DEFAULT 0,
+  last_post_id INTEGER DEFAULT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (user_a, user_b)
+);
 `);
 
 export function now() {

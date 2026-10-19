@@ -21,6 +21,108 @@ App.register('conv', async (el, seg) => {
   // 合规反诈：消息内容命中涉资金敏感词时，气泡下方追加红色警示条（复用 .msg-safety 红色变体）
   const SCAM_RE = /转账|打钱|借钱|保证金|解冻费/;
 
+  /* ---------- VD-05 FE-1：破冰话题卡 ----------
+   * 会话消息 ≤1 条（空会话）且 BE 返回 context（关联帖 + 双方标签）时，
+   * 消息区顶部渲染 2-3 张话题卡（白卡 + 左侧橙色竖条），点击仅填入输入框不直接发送；
+   * 有人开口（消息 >1 条）后话题卡沉底消失；无 context 不渲染（BE 未合入时零影响）。 */
+  const TOPIC_FALLBACKS = ['先自我介绍，再问问TA一般什么时候有空', '说说你期待的氛围，让TA更快了解你'];
+  const catNames = {};        // 分类 key → 名称（话题卡文案用，meta 有缓存）
+  let catNamesReady = false;
+  let convContext = null;     // { post_category, post_title, my_tags, other_tags }
+  let msgCount = 0;           // 会话消息数（含安全提示），>1 后话题卡不再展示
+  const msgStore = new Map(); // message id → 原始消息对象（长按举报/复制的取证数据源）
+
+  async function ensureCatNames() {
+    if (catNamesReady) return;
+    try {
+      const m = await App.meta();
+      (m?.categories || []).forEach((c) => { catNames[c.key] = c.name; });
+      catNamesReady = true;
+    } catch { /* meta 失败用原始 key 兜底，不阻塞 */ }
+  }
+
+  function topicCardsHTML() {
+    if (!convContext) return '';
+    const cards = [];
+    const common = (convContext.my_tags || []).filter((t) => (convContext.other_tags || []).includes(t));
+    if (common.length) cards.push(`你们都爱「${common[0]}」，问问TA常去哪儿`);
+    if (convContext.post_category) {
+      const name = catNames[convContext.post_category] || convContext.post_category;
+      cards.push(`聊聊这场「${name}」的安排`);
+    }
+    if (convContext.post_title) cards.push(`确认下「${String(convContext.post_title).slice(0, 16)}」的时间地点？`);
+    const list = [...new Set(cards)];
+    for (const f of TOPIC_FALLBACKS) { if (list.length >= 2) break; if (!list.includes(f)) list.push(f); }
+    if (!list.length) return '';
+    return `<div class="topic-cards" id="topic-cards">
+      <div class="topic-cards-cap">破冰话题 · 点一下填入输入框</div>
+      ${list.slice(0, 3).map((t) => `<div class="topic-card" data-topic="${UI.esc(t)}">${UI.esc(t)}</div>`).join('')}
+    </div>`;
+  }
+
+  function bindTopics() {
+    el.querySelectorAll('.topic-card').forEach((c) => {
+      c.onclick = () => { input.value = c.dataset.topic; input.focus(); };
+    });
+  }
+
+  function dropTopics() { el.querySelector('#topic-cards')?.remove(); }
+
+  /* ---------- VD-07 FE-6：已读回执 ----------
+   * 仅"自己发的最后一条"消息在 read_at 非空时于时间旁渲染灰绿色"已读"小字；
+   * 收到 WS peer_read 事件原地更新该条 DOM，不重绘列表（断线重连以接口 read_at 为准兜底）。 */
+  function paintReadReceipt() {
+    el.querySelectorAll('.msg-read').forEach((n) => n.remove());
+    const mineRows = el.querySelectorAll('.msg-row.mine');
+    const last = mineRows[mineRows.length - 1];
+    if (last && last.dataset.read === '1') {
+      last.querySelector('.msg-time')?.insertAdjacentHTML('beforeend', '<span class="msg-read">已读</span>');
+    }
+  }
+
+  /* ---------- VD-06 FE-5：气泡快捷菜单（举报此消息 / 复制文字） ----------
+   * 移动端气泡长按 500ms、桌面右键 contextmenu 弹小菜单；阻止浏览器默认菜单。
+   * 举报走既有 POST /users/:other_id/report，detail 携带会话/消息 id 与内容快照。 */
+  let pressTimer = null;
+  let bubbleMenu = null;
+
+  function closeBubbleMenu() { if (bubbleMenu) { bubbleMenu.remove(); bubbleMenu = null; } }
+
+  function showBubbleMenu(m, x, y) {
+    closeBubbleMenu();
+    const menu = document.createElement('div');
+    menu.className = 'bubble-menu';
+    const items = [];
+    if (m.sender_id !== myId && other) {
+      items.push(`<button class="bubble-menu-item danger" data-act="report">${ic('flag', 15)} 举报此消息</button>`);
+    }
+    items.push(`<button class="bubble-menu-item" data-act="copy">${ic('file-text', 15)} 复制文字</button>`);
+    menu.innerHTML = items.join('');
+    document.body.appendChild(menu);
+    const mw = menu.offsetWidth || 140;
+    const mh = menu.offsetHeight || 44;
+    menu.style.left = `${Math.max(8, Math.min(window.innerWidth - mw - 8, x - mw / 2))}px`;
+    menu.style.top = `${Math.max(8, Math.min(window.innerHeight - mh - 8, y - mh - 14))}px`;
+    bubbleMenu = menu;
+    menu.querySelector('[data-act="report"]')?.addEventListener('click', async () => {
+      closeBubbleMenu();
+      try {
+        await API.post(`/users/${other.id}/report`, {
+          reason: '骚扰',
+          detail: `会话#${currentConvId} 消息#${m.id} 消息内容: ${String(m.content).slice(0, 120)}`,
+        });
+        UI.toast('已收到举报，我们会尽快核实');
+      } catch (err) { UI.toast(err.message); }
+    });
+    menu.querySelector('[data-act="copy"]').addEventListener('click', async () => {
+      closeBubbleMenu();
+      try { await navigator.clipboard.writeText(String(m.content || '')); UI.toast('已复制'); }
+      catch { UI.toast('复制失败，请手动选择复制'); }
+    });
+  }
+
+  const onMenuDismiss = (e) => { if (bubbleMenu && !bubbleMenu.contains(e.target)) closeBubbleMenu(); };
+
   const chatPaneHTML = `
     <div class="navbar">
       <div class="navbar-inner">
@@ -83,10 +185,11 @@ App.register('conv', async (el, seg) => {
     if (m.type === 'safety') {
       return `<div class="msg-safety">${UI.esc(m.content)}</div>`;
     }
+    msgStore.set(m.id, m); // 长按举报/复制取证
     const mine = m.sender_id === myId;
     const who = mine ? {} : (other || {});
     return `
-    <div class="msg-row ${mine ? 'mine' : ''}">
+    <div class="msg-row ${mine ? 'mine' : ''}" data-mid="${m.id}" data-read="${mine && m.read_at ? 1 : 0}">
       ${mine ? '' : UI.avatarHTML(who)}
       <div style="max-width:74%;">
         <div class="bubble">${UI.esc(m.content)}</div>
@@ -148,11 +251,20 @@ App.register('conv', async (el, seg) => {
     const data = await API.get(`/chat/conv/${convId}/messages`);
     other = data.other;
     myId = window.__me?.id ?? API.savedUser()?.id ?? myId;
+    convContext = data.context || null;           // VD-05：BE 契约新增，未合入时为 undefined
+    msgCount = (data.messages || []).length;
+    msgStore.clear();
+    await ensureCatNames();
     el.querySelector('#title').innerHTML = `
       ${UI.esc(other?.nickname || '…')}
       ${other?.verify_real ? '<span class="vbadge real">真人</span>' : ''}
       ${other?.verify_student ? '<span class="vbadge real">学生</span>' : ''}`;
-    msgsEl.innerHTML = data.messages.map(msgHTML).join('') || UI.empty('message-circle', '打个招呼', '聊聊具体安排，认识一下吧');
+    // 空会话（≤1 条）且有关联上下文 → 消息区顶部渲染破冰话题卡
+    const topics = msgCount <= 1 && convContext ? topicCardsHTML() : '';
+    const bodyHTML = data.messages.map(msgHTML).join('');
+    msgsEl.innerHTML = topics + (bodyHTML || (topics ? '' : UI.empty('message-circle', '打个招呼', '聊聊具体安排，认识一下吧')));
+    bindTopics();
+    paintReadReceipt(); // VD-07：历史消息 read_at 兜底渲染
     scrollBottom();
     App.refreshBadges();
     // 桌面端切换不跳路由：仅同步地址栏，便于刷新后回到当前会话
@@ -189,10 +301,58 @@ App.register('conv', async (el, seg) => {
     if (payload.message?.conv_id !== currentConvId) return;
     const nearBottom = msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 120;
     msgsEl.insertAdjacentHTML('beforeend', msgHTML(payload.message));
+    msgCount += 1;
+    if (msgCount > 1) dropTopics(); // 有人开口后话题卡沉底（VD-05）
+    paintReadReceipt();             // 新消息成为"我的最后一条"，重算已读位（VD-07）
     if (nearBottom) scrollBottom();
     App.refreshBadges();
   };
   const onErr = (payload) => { if (payload.error) UI.toast(payload.error); };
+
+  // VD-07 FE-6：对端打开会话（批量置读）→ WS 推送 peer_read，原地标记我的最后一条为已读
+  const onPeerRead = (payload) => {
+    if (String(payload.conv_id) !== String(currentConvId)) return;
+    const mineRows = el.querySelectorAll('.msg-row.mine');
+    const last = mineRows[mineRows.length - 1];
+    if (last && last.dataset.read !== '1') {
+      last.dataset.read = '1';
+      paintReadReceipt();
+    }
+  };
+
+  // VD-06 FE-5：气泡长按（500ms）/ 桌面右键 → 快捷菜单；阻止默认菜单
+  msgsEl.addEventListener('touchstart', (e) => {
+    const bubble = e.target.closest('.bubble');
+    if (!bubble) return;
+    const m = msgStore.get(parseInt(bubble.closest('.msg-row')?.dataset.mid, 10));
+    if (!m) return;
+    const t = e.touches[0];
+    const x = t.clientX;
+    const y = t.clientY;
+    pressTimer = setTimeout(() => {
+      pressTimer = null;
+      try { if (navigator.vibrate) navigator.vibrate(10); } catch { /* ignore */ }
+      showBubbleMenu(m, x, y);
+    }, 500);
+  }, { passive: true });
+  ['touchend', 'touchmove', 'touchcancel'].forEach((ev) => {
+    msgsEl.addEventListener(ev, () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } }, { passive: true });
+  });
+  msgsEl.addEventListener('contextmenu', (e) => {
+    const bubble = e.target.closest('.bubble');
+    if (!bubble) return;
+    e.preventDefault(); // 阻止浏览器默认右键菜单
+    const m = msgStore.get(parseInt(bubble.closest('.msg-row')?.dataset.mid, 10));
+    if (m) showBubbleMenu(m, e.clientX, e.clientY);
+  });
+  document.addEventListener('click', onMenuDismiss);
+  document.addEventListener('touchstart', onMenuDismiss, { passive: true });
+  App.onCleanup(() => {
+    document.removeEventListener('click', onMenuDismiss);
+    document.removeEventListener('touchstart', onMenuDismiss);
+    if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+    closeBubbleMenu();
+  });
 
   // 举报/拉黑菜单
   el.querySelector('#btn-more').onclick = () => {
@@ -242,6 +402,7 @@ App.register('conv', async (el, seg) => {
   // 会话加载成功后才挂 WS 回调，并注册页级卸载
   WS.on('chat', onMsg);
   WS.on('chat_error', onErr);
-  App.onCleanup(() => { WS.off('chat', onMsg); WS.off('chat_error', onErr); });
+  WS.on('peer_read', onPeerRead); // VD-07：对端已读实时回执
+  App.onCleanup(() => { WS.off('chat', onMsg); WS.off('chat_error', onErr); WS.off('peer_read', onPeerRead); });
   if (desktop) loadConvList();
 });

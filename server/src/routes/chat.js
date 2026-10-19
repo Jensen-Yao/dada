@@ -1,6 +1,9 @@
 import { Router } from 'express';
 import { db, now } from '../db.js';
-import { requireAuth, ok, filterContent, notify, anyBlocked } from '../util.js';
+import { requireAuth, ok, filterContent, notify, anyBlocked, safeJSON } from '../util.js';
+// 循环依赖说明：index.js 导入本模块，本模块导入 index.js 的 notifyWS（函数声明具提升，
+// 且仅在请求处理器内调用），ESM 活绑定下安全。
+import { notifyWS } from '../index.js';
 
 export const chatRouter = Router();
 
@@ -77,12 +80,28 @@ chatRouter.get('/conv/:id/messages', requireAuth, (req, res) => {
   if (c.user_a !== req.user.id && c.user_b !== req.user.id) return res.status(403).json({ error: '无权访问该会话' });
   const rows = db.prepare('SELECT * FROM messages WHERE conv_id = ? ORDER BY id ASC LIMIT 500').all(c.id);
   // 标记已读
-  db.prepare('UPDATE messages SET read_at = ? WHERE conv_id = ? AND sender_id != ? AND read_at IS NULL').run(now(), c.id, req.user.id);
+  const marked = db.prepare('UPDATE messages SET read_at = ? WHERE conv_id = ? AND sender_id != ? AND read_at IS NULL').run(now(), c.id, req.user.id);
   const otherId = c.user_a === req.user.id ? c.user_b : c.user_a;
   const other = db.prepare('SELECT * FROM users WHERE id = ?').get(otherId);
+  // VD-07 已读回执：本次拉取确实把对端消息置读时，经 WS 推 peer_read 给对端（FE 原地更新"送达→已读"）
+  if (marked.changes > 0 && otherId !== req.user.id) notifyWS(otherId, 'peer_read', { conv_id: c.id });
+  // VD-05/BE-6 破冰上下文：会话关联帖（分类/标题）+ 双方 tags，供 FE 话题卡
+  let context = null;
+  if (c.post_id) {
+    const post = db.prepare('SELECT * FROM posts WHERE id = ?').get(c.post_id);
+    if (post) {
+      context = {
+        post_category: post.category,
+        post_title: post.title,
+        my_tags: safeJSON(req.user.tags, []),
+        other_tags: safeJSON(other ? other.tags : '[]', []),
+      };
+    }
+  }
   res.json(ok({
-    messages: rows.map((m) => ({ id: m.id, sender_id: m.sender_id, type: m.type, content: m.content, created_at: m.created_at })),
+    messages: rows.map((m) => ({ id: m.id, sender_id: m.sender_id, type: m.type, content: m.content, created_at: m.created_at, read_at: m.read_at })),
     other: other ? { id: other.id, nickname: other.nickname, avatar: other.avatar, gender: other.gender } : null,
+    context,
   }));
 });
 

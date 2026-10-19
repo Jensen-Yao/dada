@@ -666,3 +666,149 @@
   text-align: center; margin-top: 14px;
   font-size: 13px; color: var(--text-3); cursor: pointer; padding: 4px 0;
 }
+
+/* ============================================================
+   8. v3.0 多维洞察落地（VD-03/04/05/06/07/08 前端增量）
+   ============================================================ */
+
+/* --- VD-05 FE-1 破冰话题卡：空会话消息区顶部，白卡 + 左侧橙色竖条 --- */
+.topic-cards {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 12px 14px 2px;
+}
+.topic-cards-cap {
+  font-size: var(--fs-xs); color: var(--text-3); font-weight: 600; letter-spacing: 0.5px;
+}
+.topic-card {
+  position: relative;
+  background: var(--card);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-soft);
+  padding: 11px 12px 11px 17px;
+  font-size: 13.5px; line-height: 1.55; color: var(--text);
+  cursor: pointer; overflow: hidden;
+}
+.topic-card::before {
+  content: '';
+  position: absolute; left: 0; top: 9px; bottom: 9px; width: 3.5px;
+  border-radius: 0 2px 2px 0;
+  background: var(--grad-primary);
+}
+.topic-card:active { background: #FFF7F2; }
+
+/* --- VD-05 FE-2 申请留言模板 chip：申请 sheet 内 textarea 下方 --- */
+.tpl-chips {
+  display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px;
+}
+.tpl-chip {
+  font-size: 12.5px; font-weight: 500;
+  padding: 6px 12px; border-radius: 99px;
+  background: #FFF4EC; color: var(--primary-deep);
+  border: 1px solid #FFE3D2;
+  cursor: pointer; line-height: 1.4;
+}
+.tpl-chip:active { background: #FFE9DB; }
+
+/* --- VD-03 FE-3 搭后三选一区块：互评面板底部 --- */
+.rel-block {
+  margin-top: 14px; padding: 14px 14px 12px;
+  border-radius: var(--radius-md);
+  background: #FFF9F5;
+  border: 0.5px solid #FFE3D2;
+}
+.rel-title { font-weight: 800; font-size: 15px; text-align: center; color: var(--text); }
+.rel-sub { text-align: center; font-size: 12px; color: var(--text-3); margin: 4px 0 12px; }
+.rel-btns { display: flex; gap: 8px; }
+.rel-btn {
+  flex: 1; padding: 10px 0; border-radius: 12px;
+  background: #fff; border: 1px solid var(--line);
+  font-size: 13.5px; font-weight: 600; color: var(--text);
+  cursor: pointer; line-height: 1.4;
+}
+.rel-btn:active { background: var(--bg); }
+.rel-btn.primary { background: var(--grad-primary); color: #fff; border: none; }
+.rel-btn.primary:active { opacity: 0.88; }
+.rel-note { margin-top: 10px; font-size: 11.5px; color: var(--text-3); text-align: center; line-height: 1.5; }
+.rel-archived {
+  margin-top: 12px; padding: 10px 12px; text-align: center;
+  font-size: 12.5px; color: var(--text-3);
+  background: var(--bg); border-radius: 10px;
+}
+
+/* --- VD-03 FE-3 搭友列表页 --- */
+.partners-sub {
+  padding: 12px 16px 4px;
+  font-size: var(--fs-sm); color: var(--text-3);
+}
+.partner-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px; background: var(--card);
+  border-bottom: 0.5px solid var(--line);
+  cursor: pointer;
+}
+.partner-row:active { background: var(--bg); }
+.partner-info { flex: 1; min-width: 0; }
+.partner-name { font-weight: 650; font-size: 14.5px; display: flex; align-items: center; gap: 5px; }
+.partner-meta { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.pill.partner-times {
+  background: #FFF4EC; color: var(--primary-deep); font-weight: 650;
+}
+
+/* --- VD-04 FE-4 老搭子高亮 chip：发现页理由 chips 中的橙色变体 --- */
+.match-chip.buddy {
+  background: #FFF4EC; color: var(--primary-deep);
+  border: 0.5px solid #FFD9C0; font-weight: 650;
+}
+
+/* --- VD-06 FE-5 气泡长按/右键快捷菜单 --- */
+.bubble { -webkit-touch-callout: none; }
+.bubble-menu {
+  position: fixed; z-index: 300;
+  background: #fff; border-radius: 12px;
+  box-shadow: 0 6px 24px rgba(34, 36, 38, 0.18);
+  overflow: hidden; min-width: 136px;
+  padding: 4px 0;
+}
+.bubble-menu-item {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; padding: 11px 14px;
+  background: none; border: none; cursor: pointer;
+  font-size: 13.5px; color: var(--text); text-align: left;
+}
+.bubble-menu-item svg { flex-shrink: 0; color: var(--text-3); }
+.bubble-menu-item:active { background: var(--bg); }
+.bubble-menu-item.danger { color: var(--danger); }
+.bubble-menu-item.danger svg { color: var(--danger); }
+
+/* --- VD-07 FE-6 已读回执：自己最后一条消息时间旁灰绿小字 --- */
+.msg-read {
+  margin-left: 6px;
+  font-size: 10px; font-weight: 500;
+  color: #5E9C7B; /* 灰绿色 */
+}
+
+/* --- VD-08 FE-7 发现页城市切换 chips + 开放局数 --- */
+.city-chips {
+  display: flex; gap: 8px;
+  padding: 10px 14px 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.city-chips::-webkit-scrollbar { display: none; }
+.city-chip {
+  flex-shrink: 0;
+  padding: 6px 14px; border-radius: 99px;
+  background: var(--bg); color: var(--text-2);
+  font-size: 12.5px; font-weight: 600;
+  border: 1px solid transparent;
+  cursor: pointer; line-height: 1.4;
+}
+.city-chip.active {
+  background: var(--grad-primary); color: #fff;
+}
+.city-chip:not(.active):active { background: var(--line); }
+.city-count {
+  padding: 8px 16px 0; min-height: 19px;
+  font-size: 11.5px; color: var(--text-3);
+}

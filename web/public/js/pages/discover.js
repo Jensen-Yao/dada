@@ -13,92 +13,150 @@ function matchBadgeHTML(score) {
 }
 
 App.register('discover', async (el) => {
+  /* ---------- VD-08 FE-7：附近城市 chip 排 ----------
+   * 发现页顶部城市切换（北京/上海/广州/深圳/成都/杭州/全部，当前高亮），
+   * 点击切 GET /api/recommend?city=X 热门流并显示该城开放局数；
+   * 默认"我的城市"（me.city 命中 chip 则选中，否则全部）。 */
+  const CITY_CHIPS = ['北京', '上海', '广州', '深圳', '成都', '杭州'];
+  let city = '';
+  const cityCounts = {}; // 城市 → 开放局数（/cities 聚合，失败时用 recommend 列表长度兜底）
+
+  let meCity = window.__me?.city || '';
+  if (API.isLogin() && !meCity) {
+    try { meCity = (await API.get('/auth/me')).city || ''; } catch { /* ignore */ }
+  }
+  if (CITY_CHIPS.includes(meCity)) city = meCity;
+
   el.innerHTML = `
   <div class="navbar">
     <div class="navbar-inner"><div class="navbar-title" style="text-align:left; font-size:var(--fs-title); font-weight:800;">发现搭子</div></div>
   </div>
-  <div id="feed">${UI.wfSkeleton(6)}</div>`;
+  <div class="city-chips" id="city-chips"></div>
+  <div class="city-count" id="city-count"></div>
+  <div id="fy-part"></div>
+  <div id="hot-part">${UI.wfSkeleton(6)}</div>`;
 
-  async function load() {
-    const feed = el.querySelector('#feed');
+  function chipsHTML() {
+    return [...CITY_CHIPS, '全部'].map((c) => {
+      const v = c === '全部' ? '' : c;
+      return `<button class="city-chip ${city === v ? 'active' : ''}" data-city="${v}">${c}</button>`;
+    }).join('');
+  }
+
+  function paintCityCount() {
+    const cnt = el.querySelector('#city-count');
+    if (!cnt) return;
+    cnt.textContent = city ? `${city} · ${cityCounts[city] != null ? cityCounts[city] : '—'} 场搭局开放中` : '';
+  }
+
+  function paintChips() {
+    el.querySelector('#city-chips').innerHTML = chipsHTML();
+    el.querySelectorAll('#city-chips .city-chip').forEach((b) => {
+      b.onclick = () => {
+        if (city === b.dataset.city) return;
+        city = b.dataset.city;
+        paintChips();
+        loadHot();
+      };
+    });
+    paintCityCount();
+  }
+
+  // ---------- 为你推荐（登录用户） ----------
+  async function loadFY() {
+    const fyEl = el.querySelector('#fy-part');
+    fyEl.innerHTML = '';
+    if (!API.isLogin()) return;
+    let fy;
+    try { fy = await API.get('/for-you'); } catch { return; /* ignore */ }
+    // 合规：个性化推荐已关闭 → 提示条 + 热门展示（热门区在下方独立渲染）
+    if (fy.rec_off) {
+      fyEl.innerHTML = `<div class="rec-off-tip">${UI.icon('info', 13)}个性化推荐已关闭，按热门展示</div>`;
+      return;
+    }
+    if (!fy.list.length) return;
+    const items = fy.list.slice(0, 5);
     const parts = [];
-    let recOff = false;
-    let fyMatch = null; // 为你而设卡片的评分数据（id → post），渲染后注入徽章/chips
-
-    // 为你推荐（登录用户）
-    if (API.isLogin()) {
-      try {
-        const fy = await API.get('/for-you');
-        // 合规：个性化推荐已关闭（for-you 返回 rec_off=true 且 list 为空）→
-        // 不渲染"为你而设"区块，改为按热门展示
-        if (fy.rec_off) recOff = true;
-        else if (fy.list.length) {
-          const items = fy.list.slice(0, 5);
-          // MT-03：冷启动 → 区块顶部提示条（列表照常展示热门、不出徽章）
-          // MT-02 契约：cold_start 时 list 为热门 20 条，每条不带 match_score
-          if (fy.cold_start) {
-            parts.push(`
-              <div class="cold-tip" id="cold-tip">${UI.icon('info', 15)}
-                <span class="cold-tip-text">选择兴趣标签，解锁精准匹配</span>
-                <span class="cold-tip-btn">去设置</span>
-              </div>`);
-          }
-          // 新卡片：match_reasons 已由 chips 行承接，不再重复渲染旧 reason 角标；
-          // 未升级 BE（无新字段）时保留旧 reason 角标兼容
-          const hasMatch = (p) => p.match_score != null || (p.match_reasons && p.match_reasons.length);
-          parts.push(`
-            <div class="section-title">为你而设 <span class="pill">${fy.cold_start ? '先看看热门' : '根据你的搭子偏好'}</span></div>
-            <div class="wf fy-wf">${items.map((p) => UI.pinCard(p, hasMatch(p) ? {} : { reason: p.reason })).join('')}</div>`);
-          fyMatch = {};
-          items.forEach((p) => { fyMatch[p.id] = p; });
-        }
-      } catch { /* ignore */ }
+    // MT-03：冷启动 → 区块顶部提示条（列表照常展示热门、不出徽章）
+    if (fy.cold_start) {
+      parts.push(`
+        <div class="cold-tip" id="cold-tip">${UI.icon('info', 15)}
+          <span class="cold-tip-text">选择兴趣标签，解锁精准匹配</span>
+          <span class="cold-tip-btn">去设置</span>
+        </div>`);
     }
-
-    if (recOff) {
-      parts.unshift(`<div class="rec-off-tip">${UI.icon('info', 13)}个性化推荐已关闭，按热门展示</div>`);
-    }
-
-    // 热门搭局
-    const hot = await API.get('/recommend');
+    // 新卡片：match_reasons 已由 chips 行承接，不再重复渲染旧 reason 角标；
+    // 未升级 BE（无新字段）时保留旧 reason 角标兼容
+    const hasMatch = (p) => p.match_score != null || (p.match_reasons && p.match_reasons.length);
     parts.push(`
-      <div class="section-title">本周热门搭局</div>
-      ${hot.list.slice(0, 10).length
-        ? `<div class="wf">${hot.list.slice(0, 10).map((p) => UI.pinCard(p, { reason: p.reason })).join('')}</div>`
-        : UI.empty('trending-up', '还没有热门搭局', '去广场发布第一个吧')}
-      <div style="text-align:center; padding:16px; color:var(--text-3); font-size:12px;">
-        搭搭 · 让每一次搭伙都靠谱<br>轻社交 · 不婚恋 · 有边界
-      </div>`);
-
-    feed.innerHTML = parts.join('');
-    feed.querySelectorAll('.pin-card').forEach((c) => {
+      <div class="section-title">为你而设 <span class="pill">${fy.cold_start ? '先看看热门' : '根据你的搭子偏好'}</span></div>
+      <div class="wf fy-wf">${items.map((p) => UI.pinCard(p, hasMatch(p) ? {} : { reason: p.reason })).join('')}</div>`);
+    fyEl.innerHTML = parts.join('');
+    fyEl.querySelectorAll('.pin-card').forEach((c) => {
       c.onclick = () => App.navigate('#/post/' + c.dataset.id);
     });
 
     // MT-03：为你而设卡片注入匹配徽章（封面右上角）+ 理由 chips（作者行下）
-    if (fyMatch) {
-      feed.querySelectorAll('.fy-wf .pin-card').forEach((card) => {
-        const p = fyMatch[card.dataset.id];
-        if (!p) return;
-        const cover = card.querySelector('.pin-cover');
-        if (cover && p.match_score != null) {
-          cover.insertAdjacentHTML('beforeend', matchBadgeHTML(p.match_score));
-          // 封面右上已有"仅限女生/男生"角标时徽章下移避让，不互相遮挡
-          const badge = cover.querySelector('.match-badge');
-          if (badge && cover.querySelector('.pin-flag.tr')) badge.classList.add('stacked');
-        }
-        const body = card.querySelector('.pin-body');
-        if (body && p.match_reasons && p.match_reasons.length) {
-          body.insertAdjacentHTML('beforeend', `
-            <div class="match-chips">${p.match_reasons.slice(0, 3).map((r) => `<span class="match-chip">${UI.esc(r)}</span>`).join('')}</div>`);
-        }
-      });
-    }
+    const fyMatch = {};
+    items.forEach((p) => { fyMatch[p.id] = p; });
+    fyEl.querySelectorAll('.fy-wf .pin-card').forEach((card) => {
+      const p = fyMatch[card.dataset.id];
+      if (!p) return;
+      const cover = card.querySelector('.pin-cover');
+      if (cover && p.match_score != null) {
+        cover.insertAdjacentHTML('beforeend', matchBadgeHTML(p.match_score));
+        // 封面右上已有"仅限女生/男生"角标时徽章下移避让，不互相遮挡
+        const badge = cover.querySelector('.match-badge');
+        if (badge && cover.querySelector('.pin-flag.tr')) badge.classList.add('stacked');
+      }
+      const body = card.querySelector('.pin-body');
+      if (body && p.match_reasons && p.match_reasons.length) {
+        // VD-04 FE-4：老搭子理由（首位"老搭子·搭过N次"）渲染为橙色高亮 chip，区分普通灰 chip
+        body.insertAdjacentHTML('beforeend', `
+          <div class="match-chips">${p.match_reasons.slice(0, 3).map((r) => `<span class="match-chip${/^老搭子/.test(r) ? ' buddy' : ''}">${UI.esc(r)}</span>`).join('')}</div>`);
+      }
+    });
 
     // MT-03：冷启动提示条 → 去设置兴趣标签
-    const coldTip = feed.querySelector('#cold-tip');
+    const coldTip = fyEl.querySelector('#cold-tip');
     if (coldTip) coldTip.onclick = () => App.navigate('#/edit-profile');
   }
+
+  // ---------- 热门搭局（VD-08：城市 chip 切换 /api/recommend?city=X） ----------
+  async function loadHot() {
+    const hotEl = el.querySelector('#hot-part');
+    hotEl.innerHTML = UI.wfSkeleton(6);
+    let hot;
+    try {
+      hot = await API.get('/recommend?city=' + encodeURIComponent(city || ''));
+    } catch (err) {
+      hotEl.innerHTML = UI.empty('alert-circle', '加载失败', err.message);
+      return;
+    }
+    hotEl.innerHTML = `
+      <div class="section-title">${city ? `热门搭局 · ${UI.esc(city)}` : '本周热门搭局'}</div>
+      ${hot.list.slice(0, 10).length
+        ? `<div class="wf">${hot.list.slice(0, 10).map((p) => UI.pinCard(p, { reason: p.reason })).join('')}</div>`
+        : UI.empty('trending-up', '这座城市还没有搭局', '发一个试试，等搭子来找你')}
+      <div style="text-align:center; padding:16px; color:var(--text-3); font-size:12px;">
+        搭搭 · 让每一次搭伙都靠谱<br>轻社交 · 不婚恋 · 有边界
+      </div>`;
+    hotEl.querySelectorAll('.pin-card').forEach((c) => {
+      c.onclick = () => App.navigate('#/post/' + c.dataset.id);
+    });
+    // 城市开放局数兜底（/cities 未返回该城时用列表长度）
+    if (city && cityCounts[city] == null) { cityCounts[city] = hot.list.length; paintCityCount(); }
+  }
+
+  paintChips();
+  // 城市开放局数（open+full 聚合，接口失败静默）
+  API.get('/cities').then((rows) => {
+    rows.forEach((r) => { cityCounts[r.city] = r.c; });
+    paintCityCount();
+  }).catch(() => {});
+
+  await loadFY();
+  await loadHot();
 
   // ---------- MT-04：注册后一次性引导（冷启动闭环） ----------
   // 触发条件：登录态 + dada_need_onboard==='1'（login.js 注册成功写入）+ 未处理过（dada_onboarded 未设）
@@ -139,7 +197,7 @@ App.register('discover', async (el) => {
         localStorage.setItem('dada_onboarded', '1');
         s.close();
         UI.toast('匹配已就绪');
-        await load(); // 重新加载推荐（带新标签评分）
+        await Promise.all([loadFY(), loadHot()]); // 重新加载推荐（带新标签评分）
       } catch (err) {
         UI.toast(err.message);
         doneBtn.disabled = false;
@@ -164,6 +222,5 @@ App.register('discover', async (el) => {
     showOnboard(city);
   }
 
-  await load();
   maybeOnboard();
 });

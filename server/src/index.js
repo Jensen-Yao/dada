@@ -13,6 +13,7 @@ import { chatRouter, handleChatMessage } from './routes/chat.js';
 import { miscRouter } from './routes/misc.js';
 import { adminRouter } from './routes/admin.js';
 import { safetyRouter } from './routes/safety.js';
+import { startJobs } from './jobs.js'; // VD-02 定时任务：过期 / 互评提醒 / 老搭子推送
 import { getAuthUser } from './util.js';
 import { db, now } from './db.js';
 
@@ -138,6 +139,8 @@ setInterval(() => {
     for (const ws of set) if (ws.readyState === 3) set.delete(ws);
   }
 }, 30000).unref();
+
+startJobs(); // VD-02：定时任务随服务启动（interval 已 unref，不阻止退出）
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`[dada] 搭搭 server running at http://localhost:${PORT}`);

@@ -43,7 +43,8 @@ miscRouter.post('/notifications/read', requireAuth, (req, res) => {
 // ---------- 推荐搭子（基于标签/MBTI/城市/分类兴趣的简易协同推荐） ----------
 miscRouter.get('/recommend', optionalAuth, (req, res) => {
   const me = req.user;
-  const city = req.query.city || (me ? me.city : '');
+  // 显式传 city=（空串）=全城；未传时登录用户默认自己城市
+  const city = req.query.city !== undefined ? String(req.query.city) : (me ? me.city : '');
   // 拉黑落地（H2）：登录视角过滤"我拉黑的 / 拉黑我的"用户发的帖
   const blockFilter = me
     ? 'AND p.user_id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = ? UNION SELECT blocker_id FROM blocks WHERE blocked_id = ?)'
@@ -147,13 +148,24 @@ miscRouter.get('/for-you', requireAuth, (req, res) => {
     });
     // match_reasons（≤3 条，枚举文案，固定顺序：标签→同城/同省→MBTI→分类→信用）
     const reasons = [];
+    // VD-04 老搭子后置加分（路由层做，match.js 纯函数零改动）：
+    // 作者与我互为搭友 → score = min(100, score + 10 × min(times, 3))，理由置顶
+    let finalScore = score;
+    let partnerTimes = 0;
+    const partnerRow = db.prepare('SELECT times FROM partners WHERE (user_a = ? AND user_b = ?) OR (user_b = ? AND user_a = ?)')
+      .get(me.id, p.user_id, me.id, p.user_id);
+    if (partnerRow && typeof score === 'number') {
+      partnerTimes = partnerRow.times;
+      finalScore = Math.min(100, score + 10 * Math.min(partnerRow.times, 3));
+      reasons.push(`老搭子·搭过${partnerRow.times}次`); // 放最前
+    }
     if (tagOverlap.length) reasons.push(`${tagOverlap.length}个共同兴趣`);
     if (city === 1) reasons.push(`同城·${p.city}`);
     else if (city === 0.6) reasons.push(`同省·${p.city.slice(0, 2)}`);
     if (mbti !== null && mbti >= 0.75) reasons.push('MBTI互补');
     if (catScore !== null && catScore > 0) reasons.push(`常玩${CATEGORY_MAP[p.category]?.name || '搭子'}`);
     if (author.credit >= 650) reasons.push('高信用搭友');
-    return { ...toView(p, author, tagOverlap), match_score: score, match_reasons: reasons.slice(0, 3) };
+    return { ...toView(p, author, tagOverlap), match_score: finalScore, match_reasons: reasons.slice(0, 3), partner_times: partnerTimes };
   }).sort((a, b) => b.match_score - a.match_score || b.id - a.id).slice(0, 20);
 
   res.json(ok({

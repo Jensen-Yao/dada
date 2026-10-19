@@ -85,6 +85,31 @@ export function safeJSON(s, fallback) {
   }
 }
 
+// ---------- 事件埋点（VD-01 成搭漏斗） ----------
+// 静默失败：埋点绝不影响主流程（游客 userId 传 null）
+export function trackEvent(userId, type, postId) {
+  try {
+    db.prepare('INSERT INTO events (user_id, type, post_id, created_at) VALUES (?,?,?,?)')
+      .run(userId ?? null, String(type), postId ?? null, now());
+  } catch { /* 静默失败 */ }
+}
+
+// ---------- 搭友关系（VD-03 搭后关系容器） ----------
+// 创建/累加搭友关系：一对用户按 id 排序（a<b）落唯一一行；互评完成一次 → times+1
+export function getOrCreatePartner(aId, bId, postId = null) {
+  if (aId === bId || !aId || !bId) return null;
+  const [a, b] = aId < bId ? [aId, bId] : [bId, aId];
+  const exist = db.prepare('SELECT * FROM partners WHERE user_a = ? AND user_b = ?').get(a, b);
+  if (!exist) {
+    db.prepare('INSERT INTO partners (user_a, user_b, times, last_post_id, created_at) VALUES (?,?,1,?,?)')
+      .run(a, b, postId, now());
+    return { user_a: a, user_b: b, times: 1, last_post_id: postId };
+  }
+  db.prepare('UPDATE partners SET times = times + 1, last_post_id = ? WHERE user_a = ? AND user_b = ?')
+    .run(postId, a, b);
+  return { ...exist, times: exist.times + 1, last_post_id: postId };
+}
+
 // ---------- 搭子类型目录 ----------
 // EM-02：emoji 字段迁移为 icon（值为前端 ui.js CAT_ICONS 的线性图标名）
 export const CATEGORIES = [

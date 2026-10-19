@@ -231,7 +231,15 @@ App.register('post', async (el, seg) => {
     }
     const s = UI.sheet('申请加入「' + UI.esc(p.title.slice(0, 20)) + '」', `
       <textarea id="f-msg" class="textarea" placeholder="和组局者打个招呼吧：为什么想加入、你能满足什么要求…（选填）"></textarea>
+      <div class="tpl-chips">
+        <span class="tpl-chip" data-tpl="我时间地点都OK，可以先聊聊">我时间地点都OK，可以先聊聊</span>
+        <span class="tpl-chip" data-tpl="同好！我常玩这个，期待组局">同好！我常玩这个，期待组局</span>
+      </div>
       <button class="btn primary block" id="btn-go" style="margin-top:12px;">提交申请</button>`);
+    // VD-05 FE-2：申请留言模板 chip，点击填入 textarea（不直接提交）
+    s.el.querySelectorAll('[data-tpl]').forEach((chip) => {
+      chip.onclick = () => { s.el.querySelector('#f-msg').value = chip.dataset.tpl; };
+    });
     // P2（H14）：提交期间禁用按钮，连点不再弹出多余的错误提示
     const go = s.el.querySelector('#btn-go');
     go.onclick = async () => {
@@ -341,6 +349,49 @@ App.register('post', async (el, seg) => {
     }
   }
 
+  /* ---------- VD-03 FE-3：搭后关系走向三选一 ----------
+   * 互评完成（自己评完即记录；"双方都评过"待 BE 在 post 详情补 my_rated 字段后自动生效）
+   * 后在互评面板底部出现「你们的搭局结束了」区块：
+   * 再约一场 → #/publish?category=原分类 预填；存为搭友 → 已自动（文案说明）；到此为止 → 收起为"已归档"（localStorage 记 post_id）。 */
+  const ratedKey = () => `dada_rated_${pid}`;
+  const relEndKey = () => `dada_rel_end_${pid}`;
+
+  function relBlockHTML(ended) {
+    if (ended) return `<div class="rel-archived" id="rel-archived">已归档 · 这场搭局就到这里</div>`;
+    return `
+    <div class="rel-block" id="rel-block">
+      <div class="rel-title">你们的搭局结束了</div>
+      <div class="rel-sub">接下来怎么走？</div>
+      <div class="rel-btns">
+        <button class="rel-btn primary" id="rel-again">再约一场</button>
+        <button class="rel-btn" id="rel-save">存为搭友</button>
+        <button class="rel-btn" id="rel-end">到此为止</button>
+      </div>
+      <div class="rel-note">互评后已是搭友，可在「我的 - 搭友列表」找到</div>
+    </div>`;
+  }
+
+  function bindRelBlock(p) {
+    const box = el.querySelector('#rate-panel');
+    if (!box?.querySelector('#rel-block')) return;
+    box.querySelector('#rel-again').onclick = () => {
+      API.post(`/posts/${pid}/relationship`, { choice: 'again' }).catch(() => {}); // BE 未合入时静默降级
+      App.navigate(`#/publish?category=${encodeURIComponent(p.category)}`);
+    };
+    box.querySelector('#rel-save').onclick = () => {
+      API.post(`/posts/${pid}/relationship`, { choice: 'save' }).catch(() => {});
+      UI.toast('互评后已是搭友，可在「我的 - 搭友列表」找到');
+      App.navigate('#/partners');
+    };
+    box.querySelector('#rel-end').onclick = () => {
+      localStorage.setItem(relEndKey(), '1');
+      API.post(`/posts/${pid}/relationship`, { choice: 'end' }).catch(() => {});
+      const blk = box.querySelector('#rel-block');
+      if (blk) blk.outerHTML = relBlockHTML(true);
+      UI.toast('已归档');
+    };
+  }
+
   async function loadRatePanel(p) {
     const box = el.querySelector('#rate-panel');
     try {
@@ -362,6 +413,14 @@ App.register('post', async (el, seg) => {
       box.querySelectorAll('[data-rate]').forEach((b) => {
         b.onclick = () => openRateSheet(parseInt(b.dataset.rate));
       });
+      // VD-03 FE-3：互评完成（自己评过 / BE 契约字段 my_rated）且未归档 → 面板底部三选一区块；
+      // 已选"到此为止"（localStorage 记 post_id）→ 收起为"已归档"
+      const iRated = localStorage.getItem(ratedKey()) === '1' || p.my_rated === true;
+      const ended = localStorage.getItem(relEndKey()) === '1';
+      if (iRated || ended) {
+        box.insertAdjacentHTML('beforeend', relBlockHTML(ended));
+        bindRelBlock(p);
+      }
     } catch (err) {
       box.innerHTML = `<div style="color:var(--danger); font-size:13px;">${UI.esc(err.message)}</div>`;
     }
@@ -410,6 +469,7 @@ App.register('post', async (el, seg) => {
           ratee_id: rateeId, stars,
           tags: [...picked], comment: s.el.querySelector('#f-rc').value,
         });
+        localStorage.setItem(ratedKey(), '1'); // VD-03：自己评完 → 互评面板底部出三选一
         s.close();
         UI.toast('评价成功，感谢反馈');
         load();

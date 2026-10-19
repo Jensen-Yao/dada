@@ -1140,4 +1140,252 @@ test('MT-05-5 冷启动：cold_start=true无match_score；补标签后恢复；r
   assert.equal(fy3.json.data.rec_off, true, 'rec_off flag for frontend fallback');
 });
 
+// ==================================================================
+// v3.0 多维洞察（BE-1/2/3/4/6）：埋点落库 / 漏斗 / partners / 老搭子加分 /
+// read_at + context + peer_read / 定时任务
+// ==================================================================
+
+let tokenF, userIdF; // 本轮隔离用户 F（事件全链路）
+
+test('VD-01 埋点落库：register/publish/post_view/join/approve/done/rate 全部进 events', async () => {
+  const { db } = await import('../src/db.js');
+  const cnt = (type, postId) => db.prepare('SELECT COUNT(*) c FROM events WHERE type = ? AND post_id = ?').get(type, postId).c;
+  // register
+  const reg = await api('POST', '/api/auth/register', { username: 'vd_event_u', password: '123456', nickname: '事件用户', city: '北京' });
+  assert.equal(reg.status, 200);
+  tokenF = reg.json.data.token;
+  userIdF = reg.json.data.user.id;
+  assert.ok(db.prepare("SELECT COUNT(*) c FROM events WHERE type = 'register' AND user_id = ?").get(userIdF).c >= 1, 'register 事件落库');
+  // publish
+  const pub = await api('POST', '/api/posts', { category: 'sports', title: 'VD埋点追踪羽毛球局', content: 'x', city: '北京', need_count: 2 }, tokenF);
+  assert.equal(pub.status, 200);
+  const pid = pub.json.data.id;
+  assert.equal(cnt('publish', pid), 1, 'publish 事件落库');
+  // 游客浏览详情 → post_view 落库且 user_id 为 NULL
+  const view = await api('GET', `/api/posts/${pid}`);
+  assert.equal(view.status, 200);
+  const ev = db.prepare("SELECT * FROM events WHERE type = 'post_view' AND post_id = ?").get(pid);
+  assert.ok(ev, 'post_view 事件落库');
+  assert.equal(ev.user_id, null, '游客浏览 user_id 为 NULL');
+  // 登录浏览 → post_view 带 user_id
+  await api('GET', `/api/posts/${pid}`, null, tokenB);
+  assert.ok(db.prepare("SELECT COUNT(*) c FROM events WHERE type = 'post_view' AND post_id = ? AND user_id = ?").get(pid, userIdB).c >= 1, '登录浏览 user_id 正确');
+  // join / approve / done / rate
+  await api('POST', `/api/posts/${pid}/join`, { message: '带上我' }, tokenB);
+  assert.equal(cnt('join', pid), 1, 'join 事件落库');
+  const joins = await api('GET', `/api/posts/${pid}/joins`, null, tokenF);
+  const joinId = joins.json.data[0].id;
+  await api('POST', `/api/posts/${pid}/joins/${joinId}/approve`, { approve: true }, tokenF);
+  assert.equal(cnt('approve', pid), 1, 'approve 事件落库');
+  await api('PUT', `/api/posts/${pid}`, { status: 'done' }, tokenF);
+  assert.equal(cnt('done', pid), 1, 'done 事件落库');
+  await api('POST', `/api/posts/${pid}/rate`, { ratee_id: userIdB, stars: 5 }, tokenF);
+  assert.equal(cnt('rate', pid), 1, 'rate 事件落库');
+});
+
+test('VD-01 admin/funnel：固定七级顺序 + 全级计数 + 日活近似 + 非管理员403', async () => {
+  const r = await api('GET', '/api/admin/funnel?days=30', null, tokenAdmin);
+  assert.equal(r.status, 200);
+  assert.equal(r.json.ok, true);
+  assert.equal(r.json.data.days, 30);
+  assert.deepEqual(
+    r.json.data.funnel.map((f) => f.type),
+    ['register', 'post_view', 'publish', 'join', 'approve', 'done', 'rate'],
+    '漏斗固定顺序：register→post_view→publish→join→approve→done→rate'
+  );
+  for (const f of r.json.data.funnel) {
+    assert.equal(typeof f.count, 'number');
+    assert.ok(f.count >= 1, `funnel[${f.type}] count>=1（本轮流程已触发各级），got ${f.count}`);
+  }
+  assert.ok(Array.isArray(r.json.data.daily_active) && r.json.data.daily_active.length >= 1, 'daily_active 存在');
+  for (const d of r.json.data.daily_active) {
+    assert.equal(typeof d.date, 'string');
+    assert.ok(d.count >= 1, '按日去重计数 >= 1');
+  }
+  const forbidden = await api('GET', '/api/admin/funnel', null, tokenB);
+  assert.equal(forbidden.status, 403);
+});
+
+test('VD-03 partners：互评完成后 times+1，双方搭友列表互见且含共同完成局数', async () => {
+  const { db } = await import('../src/db.js');
+  const mine = await api('GET', '/api/my/posts/published', null, tokenF);
+  const pid = mine.json.data.find((p) => p.title === 'VD埋点追踪羽毛球局').id;
+  // 上一用例 F 已评 B；B 回评 F → 互评完成 → 建立搭友关系 times=1
+  const rate = await api('POST', `/api/posts/${pid}/rate`, { ratee_id: userIdF, stars: 5 }, tokenB);
+  assert.equal(rate.status, 200);
+  const [a, b] = userIdF < userIdB ? [userIdF, userIdB] : [userIdB, userIdF];
+  const row = db.prepare('SELECT * FROM partners WHERE user_a = ? AND user_b = ?').get(a, b);
+  assert.ok(row, 'partners 行存在（a<b 排序）');
+  assert.equal(row.times, 1, '首次互评完成 times=1');
+  assert.equal(row.last_post_id, pid, 'last_post_id 记录共同搭的局');
+  // F 视角搭友列表
+  const mineF = await api('GET', '/api/users/me/partners', null, tokenF);
+  assert.equal(mineF.status, 200);
+  const item = mineF.json.data.list.find((x) => x.partner.id === userIdB);
+  assert.ok(item, 'B 出现在 F 的搭友列表');
+  assert.equal(item.times, 1);
+  assert.equal(item.partner.nickname, '测试乙');
+  assert.equal(typeof item.done_count, 'number');
+  assert.ok(item.done_count >= 1, '共同完成的局数计入该 done 局');
+  // B 视角互见
+  const mineB = await api('GET', '/api/users/me/partners', null, tokenB);
+  assert.ok(mineB.json.data.list.some((x) => x.partner.id === userIdF), 'F 出现在 B 的搭友列表');
+});
+
+test('VD-04 老搭子加权：构造 partner 后 /for-you 加分、理由置顶、封顶100', async () => {
+  const { db } = await import('../src/db.js');
+  // A 发一个新 open 帖作为观测对象
+  const pub = await api('POST', '/api/posts', { category: 'food', title: 'VD老搭子加权测试局', content: 'x', city: '北京' }, tokenA);
+  assert.equal(pub.status, 200);
+  const pid = pub.json.data.id;
+  // 收窄候选池：临时关闭其他人的 open 帖（结束恢复），确保目标帖进入 top20
+  const otherIds = db.prepare("SELECT id FROM posts WHERE status = 'open' AND user_id != ?").all(userIdA).map((r) => r.id);
+  if (otherIds.length) {
+    db.prepare(`UPDATE posts SET status = 'closed' WHERE id IN (${otherIds.map(() => '?').join(',')})`).run(...otherIds);
+  }
+  const [pa, pb] = userIdA < userIdB ? [userIdA, userIdB] : [userIdB, userIdA];
+  const prev = db.prepare('SELECT * FROM partners WHERE user_a = ? AND user_b = ?').get(pa, pb);
+  db.prepare('DELETE FROM partners WHERE user_a = ? AND user_b = ?').run(pa, pb); // 先清掉基线（早前火锅局互评产生过 A-B）
+  try {
+    // 无搭友：基线分，不含老搭子理由
+    const before = await api('GET', '/api/for-you', null, tokenB);
+    const itemBefore = before.json.data.list.find((p) => p.id === pid);
+    assert.ok(itemBefore, '目标帖可见');
+    const scoreBefore = itemBefore.match_score;
+    assert.ok(Number.isInteger(scoreBefore));
+    assert.ok(!itemBefore.match_reasons.some((r) => r.includes('老搭子')), '无搭友时理由不含老搭子');
+    assert.equal(itemBefore.partner_times, 0);
+    // 构造 partner times=2 → +20
+    db.prepare('INSERT INTO partners (user_a, user_b, times, last_post_id, created_at) VALUES (?,?,?,?,?)')
+      .run(pa, pb, 2, pid, Date.now());
+    const after = await api('GET', '/api/for-you', null, tokenB);
+    const itemAfter = after.json.data.list.find((p) => p.id === pid);
+    assert.ok(itemAfter);
+    assert.equal(itemAfter.match_score, Math.min(100, scoreBefore + 20), 'times=2 → +10×min(2,3)=+20');
+    assert.equal(itemAfter.partner_times, 2);
+    assert.equal(itemAfter.match_reasons[0], '老搭子·搭过2次', '老搭子理由放最前');
+    // times=5 → 加分封顶 +30，总分不超 100
+    db.prepare('UPDATE partners SET times = 5 WHERE user_a = ? AND user_b = ?').run(pa, pb);
+    const after2 = await api('GET', '/api/for-you', null, tokenB);
+    const item2 = after2.json.data.list.find((p) => p.id === pid);
+    assert.equal(item2.match_score, Math.min(100, scoreBefore + 30), 'times=5 → 加分取 min(5,3)=3');
+    assert.ok(item2.match_score <= 100, '总分封顶 100');
+    assert.equal(item2.match_reasons[0], '老搭子·搭过5次');
+  } finally {
+    // 恢复：搭友行与被收窄的帖子状态
+    if (prev) {
+      db.prepare('UPDATE partners SET times = ?, last_post_id = ? WHERE user_a = ? AND user_b = ?')
+        .run(prev.times, prev.last_post_id, pa, pb);
+    } else {
+      db.prepare('DELETE FROM partners WHERE user_a = ? AND user_b = ?').run(pa, pb);
+    }
+    if (otherIds.length) {
+      db.prepare(`UPDATE posts SET status = 'open' WHERE id IN (${otherIds.map(() => '?').join(',')})`).run(...otherIds);
+    }
+  }
+});
+
+test('VD-07+BE-6 messages 回传 read_at 与 context，拉取触发 WS peer_read', async () => {
+  const { handleChatMessage } = await import('../src/routes/chat.js');
+  const { db } = await import('../src/db.js');
+  const { default: WebSocket } = await import('ws');
+  const convs = await api('GET', '/api/chat/convs', null, tokenB);
+  const conv = convs.json.data.find((c) => c.other && c.other.id === userIdA);
+  assert.ok(conv, 'A↔B 会话存在（火锅局审批时建立，post_id=火锅局）');
+  // A 发一条新消息（B 侧产生未读）
+  const userA = db.prepare('SELECT * FROM users WHERE id = ?').get(userIdA);
+  const sent = handleChatMessage(userA, conv.id, 'VD-07已读回执测试消息');
+  assert.ok(!sent.error, 'send ok: ' + (sent.error || ''));
+  // A 先拉取：自己发的消息未被读 → read_at 字段存在且为 null
+  const aMsgs = await api('GET', `/api/chat/conv/${conv.id}/messages`, null, tokenA);
+  const aMsg = aMsgs.json.data.messages.find((m) => m.id === sent.message.id);
+  assert.ok('read_at' in aMsg, '消息对象携带 read_at 字段');
+  assert.equal(aMsg.read_at, null, '未读时 read_at=null');
+  // A 连 WS 等待 peer_read（B 拉取置读后推送）
+  const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
+  await new Promise((resolve, reject) => {
+    ws.on('error', reject);
+    ws.on('open', () => ws.send(JSON.stringify({ type: 'auth', token: tokenA })));
+    ws.on('message', (raw) => { if (JSON.parse(raw.toString()).type === 'auth_ok') resolve(); });
+  });
+  const peerRead = new Promise((resolve) => {
+    ws.on('message', (raw) => {
+      const m = JSON.parse(raw.toString());
+      if (m.type === 'peer_read' && m.conv_id === conv.id) resolve(m);
+    });
+  });
+  const bMsgs1 = await api('GET', `/api/chat/conv/${conv.id}/messages`, null, tokenB);
+  const evt = await Promise.race([
+    peerRead,
+    new Promise((_, rej) => setTimeout(() => rej(new Error('peer_read 超时')), 5000)),
+  ]);
+  assert.equal(evt.type, 'peer_read');
+  assert.equal(evt.conv_id, conv.id);
+  // B 再次拉取：该消息 read_at 已有值
+  const bMsgs2 = await api('GET', `/api/chat/conv/${conv.id}/messages`, null, tokenB);
+  const m2 = bMsgs2.json.data.messages.find((m) => m.id === sent.message.id);
+  assert.equal(typeof m2.read_at, 'number', '读后 read_at 为时间戳');
+  // BE-6 破冰上下文：关联帖（火锅局 food）+ 双方 tags
+  const ctx = bMsgs1.json.data.context;
+  assert.ok(ctx, 'context 存在');
+  assert.equal(ctx.post_category, 'food');
+  assert.equal(ctx.post_title, '测试火锅局');
+  assert.deepEqual(ctx.other_tags, ['美食', '摄影'], '对端（A）tags');
+  assert.ok(Array.isArray(ctx.my_tags), '我的 tags 字段存在');
+  ws.close();
+});
+
+test('VD-02 jobs：14天过期 / done超72h互评提醒一次 / 老搭子同城新局推送幂等', async () => {
+  const { db } = await import('../src/db.js');
+  const { runJobs } = await import('../src/jobs.js');
+  const DAY = 86400000;
+
+  // ① 老搭子推送：A↔B 已是搭友（火锅局互评产生），A 发同城（北京）新局 → B 收到定向通知
+  const notifBefore = await api('GET', '/api/notifications', null, tokenB);
+  const pushBefore = notifBefore.json.data.filter((n) => n.type === 'partner_new_post').length;
+  const pub = await api('POST', '/api/posts', { category: 'coffee', title: 'VD老搭子新局通知测试局', content: 'x', city: '北京' }, tokenA);
+  assert.equal(pub.status, 200);
+  runJobs();
+  const notifAfter = await api('GET', '/api/notifications', null, tokenB);
+  const pushes = notifAfter.json.data.filter((n) => n.type === 'partner_new_post');
+  assert.ok(pushes.length > pushBefore, 'B 收到老搭子推送');
+  assert.ok(pushes.some((n) => n.body.includes('VD老搭子新局通知测试局')), '推送正文含新局标题');
+  assert.ok(pushes.some((n) => n.body.includes('测试甲')), '推送正文含老搭子昵称');
+  // 幂等：再跑一轮不重复
+  runJobs();
+  const notifAfter2 = await api('GET', '/api/notifications', null, tokenB);
+  assert.equal(
+    notifAfter2.json.data.filter((n) => n.type === 'partner_new_post').length,
+    pushes.length,
+    '同帖不重复推送（events 防重）'
+  );
+
+  // ② 过期：open 帖 created_at 回拨 15 天 → expired
+  const old = await api('POST', '/api/posts', { category: 'study', title: 'VD过期测试局', content: 'x', city: '北京' }, tokenA);
+  assert.equal(old.status, 200);
+  const oldPid = old.json.data.id;
+  db.prepare('UPDATE posts SET created_at = ? WHERE id = ?').run(Date.now() - 15 * DAY, oldPid);
+  runJobs();
+  const expiredDetail = await api('GET', `/api/posts/${oldPid}`);
+  assert.equal(expiredDetail.json.data.status, 'expired', '超 14 天 open 帖自动过期');
+
+  // ③ 搭后互评提醒：done 超 72h 双方未互评 → 各提醒一次且不重复
+  const done = await api('POST', '/api/posts', { category: 'movie', title: 'VD互评提醒测试局', content: 'x', city: '北京', need_count: 2 }, tokenA);
+  const dpid = done.json.data.id;
+  await api('POST', `/api/posts/${dpid}/join`, {}, tokenB);
+  const jlist = await api('GET', `/api/posts/${dpid}/joins`, null, tokenA);
+  await api('POST', `/api/posts/${dpid}/joins/${jlist.json.data[0].id}/approve`, { approve: true }, tokenA);
+  await api('PUT', `/api/posts/${dpid}`, { status: 'done' }, tokenA);
+  // done 事件回拨到 73h 前
+  db.prepare("UPDATE events SET created_at = ? WHERE type = 'done' AND post_id = ?").run(Date.now() - 73 * 3600_000, dpid);
+  runJobs();
+  const bN1 = await api('GET', '/api/notifications', null, tokenB);
+  assert.equal(bN1.json.data.filter((n) => n.type === 'rate_reminder' && n.data && n.data.post_id === dpid).length, 1, 'B 收到一次互评提醒');
+  const aN1 = await api('GET', '/api/notifications', null, tokenA);
+  assert.equal(aN1.json.data.filter((n) => n.type === 'rate_reminder' && n.data && n.data.post_id === dpid).length, 1, 'A（也未互评）收到一次提醒');
+  runJobs();
+  const bN2 = await api('GET', '/api/notifications', null, tokenB);
+  assert.equal(bN2.json.data.filter((n) => n.type === 'rate_reminder' && n.data && n.data.post_id === dpid).length, 1, '不重复提醒（防重标记生效）');
+});
+
 console.log('\n✅ 全部 API 测试通过');

@@ -151,6 +151,32 @@ usersRouter.get('/me/ratings', requireAuth, (req, res) => {
   }))));
 });
 
+// ---------- 我的搭友列表（VD-03：搭后关系容器） ----------
+// 返回对端 publicUser 摘要 + 搭过次数 times + 共同完成的局数 done_count
+usersRouter.get('/me/partners', requireAuth, (req, res) => {
+  const rows = db.prepare(`
+    SELECT p.*, CASE WHEN p.user_a = ? THEN p.user_b ELSE p.user_a END partner_id
+    FROM partners p WHERE p.user_a = ? OR p.user_b = ?
+    ORDER BY p.times DESC, p.created_at DESC
+  `).all(req.user.id, req.user.id, req.user.id);
+  const doneCountStmt = db.prepare(`
+    SELECT COUNT(*) c FROM posts p WHERE p.status = 'done' AND (
+      (p.user_id = ? AND EXISTS (SELECT 1 FROM joins j WHERE j.post_id = p.id AND j.user_id = ? AND j.status = 'approved'))
+      OR (p.user_id = ? AND EXISTS (SELECT 1 FROM joins j WHERE j.post_id = p.id AND j.user_id = ? AND j.status = 'approved'))
+      OR (EXISTS (SELECT 1 FROM joins ja WHERE ja.post_id = p.id AND ja.user_id = ? AND ja.status = 'approved')
+        AND EXISTS (SELECT 1 FROM joins jb WHERE jb.post_id = p.id AND jb.user_id = ? AND jb.status = 'approved'))
+    )
+  `);
+  const list = [];
+  for (const r of rows) {
+    const u = db.prepare('SELECT * FROM users WHERE id = ?').get(r.partner_id);
+    if (!u || u.status !== 'active') continue; // 已注销/封禁用户不展示
+    const done_count = doneCountStmt.get(req.user.id, r.partner_id, r.partner_id, req.user.id, req.user.id, r.partner_id).c;
+    list.push({ partner: publicUser(u), times: r.times, last_post_id: r.last_post_id, done_count });
+  }
+  res.json(ok({ list }));
+});
+
 // ---------- 拉黑 / 取消拉黑 ----------
 usersRouter.post('/:id/block', requireAuth, (req, res) => {
   const targetId = parseInt(req.params.id);

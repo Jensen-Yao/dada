@@ -1,5 +1,5 @@
 /* ================= 发布搭局页 ================= */
-App.register('publish', async (el) => {
+App.register('publish', async (el, _seg, query) => {
   const meta = await App.meta();
   const state = {
     category: '',
@@ -132,6 +132,16 @@ App.register('publish', async (el) => {
   // 默认选中
   el.querySelector('[data-fee="aa"]').classList.add('selected');
   el.querySelector('[data-g="any"]').classList.add('selected');
+
+  // VD-03 FE-3：三选一「再约一场」跳转 #/publish?category=原分类 预填
+  const preCat = (query.get('category') || '').trim();
+  if (preCat) {
+    const btn = el.querySelector(`[data-cat="${preCat}"]`);
+    if (btn) {
+      state.category = preCat;
+      el.querySelectorAll('[data-cat]').forEach((x) => x.classList.toggle('selected', x === btn));
+    }
+  }
 
   $('cnt-minus').onclick = () => { state.need_count = Math.max(1, state.need_count - 1); $('cnt-val').textContent = state.need_count; };
   $('cnt-plus').onclick = () => { state.need_count = Math.min(20, state.need_count + 1); $('cnt-val').textContent = state.need_count; };

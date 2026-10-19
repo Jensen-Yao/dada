@@ -1,4 +1,44 @@
 /* ================= 搭搭 App 主路由 ================= */
+/* 原生壳标识：仅在 Capacitor WebView（server.url 加载）内为 true，浏览器恒为 false */
+const IS_NATIVE_APP = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+
+/* ================= 安卓返回键（H5 无感知，仅原生壳内注册） =================
+ * 规则：子页面（详情/会话/登录后内页等）按返回 = hash 路由后退 history.back()；
+ * 根页面（四个 tab / 登录页）视为栈底：2 秒内连按两次退出（toast 提示，App.exitApp()）。 */
+(() => {
+  if (!IS_NATIVE_APP) return;
+  const NativeApp = window.Capacitor.Plugins && window.Capacitor.Plugins.App;
+  if (!NativeApp || typeof NativeApp.addListener !== 'function') return;
+
+  const ROOT_PAGES = ['square', 'discover', 'chat', 'me', 'login'];
+  let backDepth = 0;   // 本次会话内可回退的 hash 历史深度
+  let suppress = false; // 本次 hashchange 是否由返回键的 history.back() 触发
+  let lastBackAt = 0;   // 栈底上次按返回键时间（双击退出计时）
+
+  const currentPage = () => {
+    const path = (location.hash.split('#/')[1] || '').split('?')[0];
+    return path.split('/').filter(Boolean)[0] || 'square';
+  };
+
+  window.addEventListener('hashchange', () => {
+    if (suppress) { suppress = false; return; }
+    backDepth++;
+  });
+
+  NativeApp.addListener('backButton', () => {
+    const now = Date.now();
+    if (backDepth > 0 && !ROOT_PAGES.includes(currentPage())) {
+      suppress = true;          // 不计入前进深度
+      backDepth--;
+      history.back();
+      return;
+    }
+    // 栈底：双击退出
+    if (now - lastBackAt < 2000) NativeApp.exitApp();
+    else { lastBackAt = now; UI.toast('再按一次退出'); }
+  });
+})();
+
 const App = (() => {
   const container = document.getElementById('page-container');
   const tabbar = document.getElementById('tabbar');
@@ -92,7 +132,7 @@ const App = (() => {
     const page = seg[0] || 'square';
 
     // 权限控制
-    const privatePages = ['publish', 'chat', 'me', 'notifications', 'myposts', 'settings', 'admin'];
+    const privatePages = ['publish', 'chat', 'me', 'notifications', 'myposts', 'settings', 'partners', 'admin'];
     if (privatePages.includes(page) && !API.isLogin()) {
       UI.toast('请先登录');
       location.hash = '#/login';
@@ -153,15 +193,19 @@ const App = (() => {
 
   /* ================= PWA（APP-02 / APP-03） ================= */
 
-  // Service Worker：仅 https 或 localhost 注册，避免 http://局域网IP 下报错
-  if ('serviceWorker' in navigator
+  // Service Worker：仅 https 或 localhost 注册，避免 http://局域网IP 下报错；
+  // Capacitor 原生壳内无意义（页面来自 server.url，无需离线缓存），同样跳过
+  if (!IS_NATIVE_APP
+    && 'serviceWorker' in navigator
     && (location.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(location.hostname))) {
     navigator.serviceWorker.register('/sw.js').catch(() => { /* 注册失败不影响功能 */ });
   }
 
   // 安装横幅：捕获 beforeinstallprompt，延迟展示；可关闭并记忆（localStorage）
+  // 原生壳内不显示（已是安装态）
   const PWA_DISMISS_KEY = 'dada_pwa_dismissed';
   (() => {
+    if (IS_NATIVE_APP) return;
     let deferredPrompt = null;
     const standalone = () => window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
 

@@ -68,6 +68,7 @@ App.register('me', async (el) => {
 
   <div class="me2-entries">
     <div class="cell" id="c-myposts"><span class="cell-icon">${ic('folder', 18)}</span><span class="cell-main">我的搭局</span><span class="cell-arrow">›</span></div>
+    <div class="cell" id="c-partners"><span class="cell-icon">${ic('people', 18)}</span><span class="cell-main">我的搭友<span class="cell-sub">互评后自动沉淀的搭子关系</span></span><span class="cell-arrow">›</span></div>
     <div class="cell" id="c-ratings"><span class="cell-icon">${ic('star', 18)}</span><span class="cell-main">收到的评价</span><span class="cell-arrow">›</span></div>
     <div class="cell" id="c-safety"><span class="cell-icon">${ic('shield', 18)}</span><span class="cell-main">安全中心</span><span class="cell-arrow">›</span></div>
     ${me.is_admin ? `<div class="cell" id="c-admin"><span class="cell-icon">${ic('bar-chart-2', 18)}</span><span class="cell-main">运营后台</span><span class="pill blue">管理员</span><span class="cell-arrow">›</span></div>` : ''}
@@ -79,6 +80,7 @@ App.register('me', async (el) => {
   el.querySelector('#btn-edit').onclick = () => App.navigate('#/edit-profile');
   el.querySelector('#btn-verify').onclick = openVerify;
   el.querySelector('#c-myposts').onclick = () => App.navigate('#/myposts');
+  el.querySelector('#c-partners').onclick = () => App.navigate('#/partners');
   el.querySelector('#c-ratings').onclick = () => App.navigate('#/ratings');
   el.querySelector('#c-safety').onclick = () => App.navigate('#/safety');
   el.querySelector('#c-admin')?.addEventListener('click', () => App.navigate('#/admin'));

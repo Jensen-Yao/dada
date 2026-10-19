@@ -8,7 +8,7 @@ import { getOrCreateConv } from './chat.js';
 import {
   requireAuth, optionalAuth, ok, publicUser, safeJSON,
   CATEGORY_MAP, FEE_MODES, RATE_TAGS, filterContent, notify, addCredit,
-  CREDIT_MIN_POST, anyBlocked, warnUser,
+  CREDIT_MIN_POST, anyBlocked, warnUser, trackEvent, getOrCreatePartner,
 } from '../util.js';
 
 export const postsRouter = Router();
@@ -170,6 +170,7 @@ postsRouter.post('/', requireAuth, (req, res) => {
     String(location_name || '').slice(0, 50), String(meet_time || '').slice(0, 30), nc, fm, gender_req || 'any', fReq.cleaned, now());
   db.prepare('UPDATE users SET last_active_at = ? WHERE id = ?').run(now(), u.id);
   const p = db.prepare('SELECT * FROM posts WHERE id = ?').get(info.lastInsertRowid);
+  trackEvent(u.id, 'publish', p.id); // VD-01 漏斗：发布
   res.json(ok(postView(p, u)));
 });
 
@@ -178,6 +179,7 @@ postsRouter.get('/:id', optionalAuth, (req, res) => {
   const p = db.prepare('SELECT * FROM posts WHERE id = ?').get(parseInt(req.params.id));
   if (!p) return res.status(404).json({ error: '搭局不存在' });
   db.prepare('UPDATE posts SET views_count = views_count + 1 WHERE id = ?').run(p.id);
+  trackEvent(req.user ? req.user.id : null, 'post_view', p.id); // VD-01 漏斗：浏览（游客 userId 为 null）
   res.json(ok(postView(p, req.user)));
 });
 
@@ -206,7 +208,10 @@ postsRouter.put('/:id', requireAuth, (req, res) => {
   if (body.status !== undefined) {
     if (!['open', 'closed', 'done'].includes(body.status)) return res.status(400).json({ error: '状态不合法' });
     sets.push('status = ?'); vals.push(body.status);
-    if (body.status === 'done') completePost(p);
+    if (body.status === 'done') {
+      completePost(p);
+      trackEvent(req.user.id, 'done', p.id); // VD-01 漏斗：完成
+    }
   }
   if (sets.length) {
     vals.push(p.id);
@@ -292,6 +297,7 @@ postsRouter.post('/:id/join', requireAuth, (req, res) => {
       .run(p.id, req.user.id, f.cleaned, 'pending', t, t);
   }
   notify(p.user_id, 'join_request', '收到入搭申请', `${req.user.nickname} 申请加入「${p.title}」`, { post_id: p.id, join_user_id: req.user.id }, req.user.id);
+  trackEvent(req.user.id, 'join', p.id); // VD-01 漏斗：申请
   res.json(ok({ joined: true, status: 'pending' }));
 });
 
@@ -330,6 +336,7 @@ postsRouter.post('/:id/joins/:joinId/approve', requireAuth, (req, res) => {
     // 通过即建立站内会话，保证"去聊天"有入口
     getOrCreateConv(p.user_id, j.user_id, p.id);
     notify(j.user_id, 'join_result', '申请已通过', `你已加入「${p.title}」，快去和组局者聊聊吧`, { post_id: p.id });
+    trackEvent(req.user.id, 'approve', p.id); // VD-01 漏斗：通过
     if (approved + 1 >= p.need_count) db.prepare("UPDATE posts SET status = 'full' WHERE id = ?").run(p.id);
   } else {
     notify(j.user_id, 'join_result', '申请未通过', `「${p.title}」的组局者未通过你的申请，别灰心，广场上还有更多搭局`, { post_id: p.id });
@@ -369,6 +376,11 @@ postsRouter.post('/:id/rate', requireAuth, (req, res) => {
   const delta = st >= 4 ? 10 : st <= 2 ? -15 : 0;
   if (delta !== 0) addCredit(ratee.id, delta, `「${p.title}」搭后互评`);
   notify(ratee.id, 'rating', '收到搭后评价', `${req.user.nickname} 给你 ${st} 星评价`, { post_id: p.id, stars: st });
+  trackEvent(req.user.id, 'rate', p.id); // VD-01 漏斗：互评
+  // VD-03：双方互评完成（对方也评过我）→ 建立/累加搭友关系 times+1
+  const reverseRated = db.prepare('SELECT 1 FROM ratings WHERE post_id = ? AND rater_id = ? AND ratee_id = ?')
+    .get(p.id, ratee.id, req.user.id);
+  if (reverseRated) getOrCreatePartner(req.user.id, ratee.id, p.id);
   res.json(ok({ rated: true }));
 });
 
