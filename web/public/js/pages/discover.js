@@ -9,17 +9,25 @@ App.register('discover', async (el) => {
   async function load() {
     const feed = el.querySelector('#feed');
     const parts = [];
+    let recOff = false;
 
     // 为你推荐（登录用户）
     if (API.isLogin()) {
       try {
         const fy = await API.get('/for-you');
-        if (fy.list.length) {
+        // 合规：个性化推荐已关闭（for-you 返回 rec_off=true 且 list 为空）→
+        // 不渲染"为你而设"区块，改为按热门展示
+        if (fy.rec_off) recOff = true;
+        else if (fy.list.length) {
           parts.push(`
             <div class="section-title">为你而设 <span class="pill">根据你的搭子偏好</span></div>
             <div class="wf">${fy.list.slice(0, 5).map((p) => UI.pinCard(p, { reason: p.reason })).join('')}</div>`);
         }
       } catch { /* ignore */ }
+    }
+
+    if (recOff) {
+      parts.unshift(`<div class="rec-off-tip">${UI.icon('info', 13)}个性化推荐已关闭，按热门展示</div>`);
     }
 
     // 热门搭局

@@ -28,6 +28,16 @@ export function getAuthUser(req) {
 
 // 挂载 req.user；未登录返回 401
 export function requireAuth(req, res, next) {
+  // 已注销账号：明确返回"账号已注销"而非通用未登录（PIPL 47条）
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+  const payload = token ? verifyToken(token) : null;
+  if (payload) {
+    const row = db.prepare('SELECT status FROM users WHERE id = ?').get(payload.uid);
+    if (row && row.status === 'deleted') {
+      return res.status(401).json({ error: '账号已注销' });
+    }
+  }
   const user = getAuthUser(req);
   if (!user) return res.status(401).json({ error: '请先登录' });
   req.user = user;
@@ -62,6 +72,7 @@ export function publicUser(u) {
     credit: u.credit,
     post_count: 0,
     rating_avg: null,
+    rec_off: !!u.rec_off, // 个性化推荐关闭状态（算法推荐规定17条，前端用于展示开关）
   };
 }
 
@@ -109,6 +120,8 @@ const SENSITIVE_WORDS = [
   '转账', '汇款', '保证金', '解冻费', '投资稳赚', '内部渠道', '高回报',
   // 涉黄暗语（据平台治理案例）
   '费用全包', '包食宿', '包吃住', '包机票', '全包价', '女生免费', '妹妹陪',
+  // 涉黄暗语补充（搭子赛道专项治理：纯绿/半绿等暗语、线下有偿陪侍话术）
+  '纯绿', '半绿', '绿色陪', '可约', '线下有偿', '有偿陪',
   // 代订诈骗话术
   '代订酒店', '代订机票', '内部票价', '优惠代充',
 ];

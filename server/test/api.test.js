@@ -810,4 +810,203 @@ test('feed分页：has_more 元信息（size=5 时 true，且与 total 关系一
   assert.equal(mid.json.data.has_more, 5 + mid.json.data.list.length < mid.json.data.total, 'page=2 has_more follows formula');
 });
 
+// ==================================================================
+// 合规专项（docs/compliance-research-2026.md）：手机号注册（网安法24条）/
+// 注销账号（PIPL 47条 + Apple 5.1.1(v)）/ 个性化推荐开关（算法推荐规定17条）/
+// 静态法律页（Apple 5.1.1(i)）/ 敏感词补充
+// ==================================================================
+
+const PHONE_A = '13800001111'; // 注册全流程
+const PHONE_B = '13900002222'; // 注销流程
+let tokenPhoneA, userIdPhoneA, tokenPhoneB, userIdPhoneB, phoneBPid, phoneACode;
+
+test('合规-短信：手机号格式校验 + demo_code 下发 + 60秒重发限制', async () => {
+  // 非法格式
+  for (const bad of ['12345', '23800001111', '1380000111', '']) {
+    const r = await api('POST', '/api/auth/sms/send', { phone: bad });
+    assert.equal(r.status, 400, `phone=${bad} should be rejected`);
+    assert.equal(r.json.error, '手机号格式不正确');
+  }
+  // 合法号码：演示环境直接带回 demo_code（6 位数字）
+  const r = await api('POST', '/api/auth/sms/send', { phone: PHONE_A });
+  assert.equal(r.status, 200);
+  assert.match(r.json.data.demo_code, /^\d{6}$/, 'demo_code should be 6 digits');
+  assert.equal(r.json.data.sent, true);
+  phoneACode = r.json.data.demo_code;
+  // 60 秒内重发被拒
+  const r2 = await api('POST', '/api/auth/sms/send', { phone: PHONE_A });
+  assert.equal(r2.status, 429);
+});
+
+test('合规-注册：手机号+验证码全流程（错误码400 / 未成年400 / 成功 / 手机号登录）', async () => {
+  // 沿用上一用例下发的验证码（未成功消费前保持有效，且受 60 秒重发限制不再重发）
+  const code = phoneACode;
+  assert.ok(code, 'should have a valid demo_code');
+  // 错误验证码 → 400
+  const badCode = await api('POST', '/api/auth/register', {
+    phone: PHONE_A, code: '000000', password: '123456', adult_confirmed: true,
+  });
+  assert.equal(badCode.status, 400);
+  assert.equal(badCode.json.error, '验证码错误或已过期');
+  // 未确认年满 18 岁 → 400
+  const minor = await api('POST', '/api/auth/register', {
+    phone: PHONE_A, code, password: '123456', adult_confirmed: false,
+  });
+  assert.equal(minor.status, 400);
+  assert.equal(minor.json.error, '需确认已满18岁');
+  // 成功注册：username 自动生成 dadu_<手机号后8位>
+  const reg = await api('POST', '/api/auth/register', {
+    phone: PHONE_A, code, password: '123456', nickname: '手机注册用户', adult_confirmed: true,
+  });
+  assert.equal(reg.status, 200, 'register should succeed: ' + JSON.stringify(reg.json));
+  assert.ok(reg.json.data.token);
+  assert.ok(reg.json.data.user.username.startsWith('dadu_'), 'auto username starts with dadu_');
+  assert.equal(reg.json.data.user.username, `dadu_${PHONE_A.slice(-8)}`);
+  tokenPhoneA = reg.json.data.token;
+  userIdPhoneA = reg.json.data.user.id;
+  // 验证码一次性：用同一验证码再注册 → 400
+  const replay = await api('POST', '/api/auth/register', {
+    phone: PHONE_A, code, password: '123456', adult_confirmed: true,
+  });
+  assert.equal(replay.status, 400);
+  // 已注册手机号再发短信 → 409
+  const again = await api('POST', '/api/auth/sms/send', { phone: PHONE_A });
+  assert.equal(again.status, 409);
+  assert.equal(again.json.error, '该手机号已注册');
+  // 手机号+密码登录
+  const login = await api('POST', '/api/auth/login', { phone: PHONE_A, password: '123456' });
+  assert.equal(login.status, 200);
+  assert.ok(login.json.data.token);
+  const badLogin = await api('POST', '/api/auth/login', { phone: PHONE_A, password: 'wrong' });
+  assert.equal(badLogin.status, 401);
+  assert.equal(badLogin.json.error, '手机号或密码错误');
+});
+
+test('合规-注销：confirm错值400 → DELETE成功 → 登录/旧token 401 → 资料清空 → 帖子保留', async () => {
+  // 先注册一个专用账号并发一帖
+  const sms = await api('POST', '/api/auth/sms/send', { phone: PHONE_B });
+  assert.equal(sms.status, 200);
+  const reg = await api('POST', '/api/auth/register', {
+    phone: PHONE_B, code: sms.json.data.demo_code, password: '123456',
+    nickname: '待注销用户', adult_confirmed: true,
+  });
+  assert.equal(reg.status, 200);
+  tokenPhoneB = reg.json.data.token;
+  userIdPhoneB = reg.json.data.user.id;
+  // 补充资料，注销后验证清空
+  const edit = await api('PUT', '/api/users/me', {
+    bio: '马上注销了', school: '某某大学', occupation: '测试员', mbti: 'INTJ', tags: ['测试'],
+  }, tokenPhoneB);
+  assert.equal(edit.status, 200);
+  const post = await api('POST', '/api/posts', {
+    category: 'food', title: '注销用户的历史搭局', content: '注销后此帖保留', city: '北京',
+  }, tokenPhoneB);
+  assert.equal(post.status, 200);
+  phoneBPid = post.json.data.id;
+  // confirm 错值 → 400
+  const wrong1 = await api('POST', '/api/users/me/delete', { confirm: 'delete' }, tokenPhoneB);
+  assert.equal(wrong1.status, 400);
+  const wrong2 = await api('POST', '/api/users/me/delete', { confirm: true }, tokenPhoneB);
+  assert.equal(wrong2.status, 400);
+  // confirm === 'DELETE' → 成功
+  const del = await api('POST', '/api/users/me/delete', { confirm: 'DELETE' }, tokenPhoneB);
+  assert.equal(del.status, 200);
+  assert.equal(del.json.data.deleted, true);
+  // 手机号已置空：登录改用保留的用户名（dadu_<后8位>）→ 401 账号已注销
+  const login = await api('POST', '/api/auth/login', { username: `dadu_${PHONE_B.slice(-8)}`, password: '123456' });
+  assert.equal(login.status, 401);
+  assert.equal(login.json.error, '账号已注销');
+  // 旧 token 访问 /auth/me 与受保护接口 → 401 账号已注销
+  const me = await api('GET', '/api/auth/me', null, tokenPhoneB);
+  assert.equal(me.status, 401);
+  assert.equal(me.json.error, '账号已注销');
+  const edit2 = await api('PUT', '/api/users/me', { bio: 'x' }, tokenPhoneB);
+  assert.equal(edit2.status, 401);
+  assert.equal(edit2.json.error, '账号已注销');
+  // 资料已清空：主页显示"已注销用户"，敏感字段全空
+  const profile = await api('GET', `/api/users/${userIdPhoneB}`);
+  assert.equal(profile.status, 200);
+  const d = profile.json.data;
+  assert.equal(d.nickname, '已注销用户');
+  assert.equal(d.bio, '');
+  assert.equal(d.school, '');
+  assert.equal(d.occupation, '');
+  assert.equal(d.mbti, '');
+  assert.deepEqual(d.tags, []);
+  assert.equal(d.avatar, null);
+  // 帖子保留（历史搭局完整性），作者显示已注销
+  const detail = await api('GET', `/api/posts/${phoneBPid}`);
+  assert.equal(detail.status, 200);
+  assert.equal(detail.json.data.title, '注销用户的历史搭局');
+  assert.equal(detail.json.data.author.nickname, '已注销用户');
+  // 手机号释放复用：重新发码注册不再 409
+  const reSms = await api('POST', '/api/auth/sms/send', { phone: PHONE_B });
+  assert.equal(reSms.status, 200, 'deleted phone should be reusable');
+  const reReg = await api('POST', '/api/auth/register', {
+    phone: PHONE_B, code: reSms.json.data.demo_code, password: '654321',
+    nickname: '复用该号码的新用户', adult_confirmed: true,
+  });
+  assert.equal(reReg.status, 200);
+});
+
+test('合规-推荐开关：rec_off=1 后 for-you 返回空（/recommend 不受影响）', async () => {
+  // B 有关注分类（参加过火锅局），for-you 正常应有内容
+  const before = await api('GET', '/api/for-you', null, tokenB);
+  assert.equal(before.status, 200);
+  assert.ok(before.json.data.list.length > 0, 'for-you should have items before rec_off');
+  assert.notEqual(before.json.data.rec_off, true);
+  // 非法值 → 400
+  const bad = await api('PUT', '/api/users/me', { rec_off: 2 }, tokenB);
+  assert.equal(bad.status, 400);
+  // 关闭个性化推荐：立即生效
+  const off = await api('PUT', '/api/users/me', { rec_off: 1 }, tokenB);
+  assert.equal(off.status, 200);
+  assert.equal(off.json.data.rec_off, true);
+  const fy = await api('GET', '/api/for-you', null, tokenB);
+  assert.equal(fy.status, 200);
+  assert.deepEqual(fy.json.data.list, [], 'for-you must be empty when rec_off=1');
+  assert.equal(fy.json.data.rec_off, true, 'response carries rec_off flag for frontend fallback');
+  // 热门排序的非个性化 /recommend 不受影响
+  const rec = await api('GET', '/api/recommend?city=北京', null, tokenB);
+  assert.equal(rec.status, 200);
+  assert.ok(rec.json.data.list.length > 0, 'recommend (hot ranking) unaffected by rec_off');
+  // 重新打开恢复正常（清理，避免影响其他用例）
+  const on = await api('PUT', '/api/users/me', { rec_off: 0 }, tokenB);
+  assert.equal(on.status, 200);
+  assert.equal(on.json.data.rec_off, false);
+  const fy2 = await api('GET', '/api/for-you', null, tokenB);
+  assert.equal(fy2.status, 200);
+  assert.notEqual(fy2.json.data.rec_off, true);
+});
+
+test('合规-敏感词：搭子赛道涉黄暗语拦截（纯绿/线下有偿等）', async () => {
+  const r1 = await api('POST', '/api/posts', {
+    category: 'travel', title: '周末徒步找纯绿搭子', content: 'x', city: '北京',
+  }, tokenA);
+  assert.equal(r1.status, 400);
+  const r2 = await api('POST', '/api/posts', {
+    category: 'coffee', title: '咖啡局正常标题', content: '线下有偿可聊', city: '北京',
+  }, tokenA);
+  assert.equal(r2.status, 400);
+});
+
+test('合规-静态法律页：/legal/privacy 与 /legal/terms 服务端直出 200', async () => {
+  // extensions: ['html'] → /legal/privacy 命中 /legal/privacy.html 静态文件（Apple 5.1.1(i) 可抓取 URL）
+  const r1 = await fetch(`${BASE}/legal/privacy`);
+  assert.equal(r1.status, 200);
+  const html1 = await r1.text();
+  assert.ok(html1.includes('隐私政策'), 'privacy page has title');
+  assert.ok(html1.includes('返回App'), 'back-to-app link present');
+  assert.ok(html1.includes('注销'), 'privacy page mentions account deletion');
+  // 完整路径同样命中
+  const r2 = await fetch(`${BASE}/legal/privacy.html`);
+  assert.equal(r2.status, 200);
+  assert.ok((await r2.text()).includes('隐私政策'));
+  const r3 = await fetch(`${BASE}/legal/terms`);
+  assert.equal(r3.status, 200);
+  const html3 = await r3.text();
+  assert.ok(html3.includes('用户服务协议'), 'terms page has title');
+  assert.ok(html3.includes('返回App'));
+});
+
 console.log('\n✅ 全部 API 测试通过');

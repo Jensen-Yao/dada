@@ -289,6 +289,8 @@ App.register('safety', async (el) => {
 /* ================= 设置 ================= */
 App.register('settings', async (el) => {
   const me = await API.get('/auth/me');
+  // 合规：个性化推荐开关状态以 /auth/me 的 rec_off 为准（BE 未返回时默认开启）
+  let recOff = me.rec_off === 1 || me.rec_off === true;
   el.innerHTML = `
   <div class="navbar">
     <div class="navbar-inner">
@@ -301,6 +303,14 @@ App.register('settings', async (el) => {
     <div class="cell"><span class="cell-icon">${UI.icon('smartphone', 18)}</span><span class="cell-main">账号</span><span style="color:var(--text-3); font-size:13px;">${UI.esc(me.id ? '用户 #' + me.id : '')}</span></div>
     <div class="cell" id="c-safety2"><span class="cell-icon">${UI.icon('shield', 18)}</span><span class="cell-main">安全中心</span><span class="cell-arrow">›</span></div>
     <div class="cell" id="c-blocks"><span class="cell-icon">${UI.icon('slash', 18)}</span><span class="cell-main">黑名单</span><span class="cell-arrow">›</span></div>
+    <div class="cell" id="c-rec">
+      <span class="cell-icon">${UI.icon('star', 18)}</span>
+      <span class="cell-main">个性化推荐<span class="cell-sub">根据搭子偏好推荐内容，关闭后按热门展示</span></span>
+      <button class="switch${recOff ? '' : ' on'}" id="sw-rec" type="button" role="switch" aria-checked="${String(!recOff)}" aria-label="个性化推荐开关"><span class="knob"></span></button>
+    </div>
+  </div>
+  <div style="margin:0 14px 14px; border-radius:16px; overflow:hidden; box-shadow:var(--shadow);">
+    <div class="cell" id="c-del"><span class="cell-icon" style="color:var(--danger);">${UI.icon('alert-triangle', 18)}</span><span class="cell-main danger">注销账号</span><span class="cell-arrow">›</span></div>
   </div>
   <div style="padding:0 14px;">
     <button class="btn danger block" id="btn-logout">退出登录</button>
@@ -308,6 +318,57 @@ App.register('settings', async (el) => {
   </div>`;
 
   el.querySelector('#c-safety2').onclick = () => App.navigate('#/safety');
+
+  // 合规：个性化推荐开关（PUT /users/me rec_off，0=开启 1=关闭）
+  const swRec = el.querySelector('#sw-rec');
+  const paintSwitch = () => {
+    swRec.classList.toggle('on', !recOff);
+    swRec.setAttribute('aria-checked', String(!recOff));
+  };
+  swRec.onclick = async () => {
+    const next = recOff ? 0 : 1;
+    try {
+      await API.put('/users/me', { rec_off: next });
+      recOff = next === 1;
+      paintSwitch();
+      UI.toast(recOff ? '已关闭个性化推荐，将按热门展示' : '已开启个性化推荐');
+    } catch (err) { UI.toast(err.message); }
+  };
+
+  // 合规：注销账号（红字入口 → 后果说明 + 手动输入 DELETE 确认 → 不可恢复）
+  el.querySelector('#c-del').onclick = () => {
+    const s = UI.sheet('注销账号', `
+      <div class="del-warn">
+        <div class="del-warn-title">${UI.icon('alert-triangle', 16)}注销后不可恢复</div>
+        <ul class="del-warn-list">
+          <li>账号信息将被清空，无法再登录</li>
+          <li>搭局记录将保留，但对外展示为匿名</li>
+          <li>操作立即生效，不可恢复</li>
+        </ul>
+      </div>
+      <div class="del-confirm-tip">如确认注销，请输入 <b>DELETE</b>：</div>
+      <input id="f-del" class="input" placeholder="输入 DELETE 确认" autocomplete="off" spellcheck="false">
+      <button class="btn danger solid block" id="btn-del" style="margin-top:12px;" disabled>确认注销</button>`);
+    const input = s.el.querySelector('#f-del');
+    const btnDel = s.el.querySelector('#btn-del');
+    input.addEventListener('input', () => { btnDel.disabled = input.value.trim() !== 'DELETE'; });
+    btnDel.onclick = async () => {
+      btnDel.disabled = true;
+      btnDel.textContent = '注销中…';
+      try {
+        await API.post('/users/me/delete', { confirm: input.value.trim() });
+        s.close();
+        WS.disconnect();
+        API.clearSession();
+        location.hash = '#/login';
+        UI.toast('账号已注销');
+      } catch (err) {
+        UI.toast(err.message);
+        btnDel.disabled = false;
+        btnDel.textContent = '确认注销';
+      }
+    };
+  };
   el.querySelector('#c-blocks').onclick = async () => {
     const list = await API.get('/users/me/blocks');
     const s = UI.sheet('黑名单', list.length ? `

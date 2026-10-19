@@ -18,6 +18,9 @@ App.register('conv', async (el, seg) => {
   // FE-A 契约图标（未落地时静默降级）
   const ic = (name, size = 24) => (typeof UI.icon === 'function' ? UI.icon(name, size) : '');
 
+  // 合规反诈：消息内容命中涉资金敏感词时，气泡下方追加红色警示条（复用 .msg-safety 红色变体）
+  const SCAM_RE = /转账|打钱|借钱|保证金|解冻费/;
+
   const chatPaneHTML = `
     <div class="navbar">
       <div class="navbar-inner">
@@ -87,6 +90,9 @@ App.register('conv', async (el, seg) => {
       ${mine ? '' : UI.avatarHTML(who)}
       <div style="max-width:74%;">
         <div class="bubble">${UI.esc(m.content)}</div>
+        ${typeof m.content === 'string' && SCAM_RE.test(m.content)
+          ? '<div class="msg-safety scam">谨防诈骗：平台不收取任何费用，切勿转账</div>'
+          : ''}
         <div class="msg-time">${UI.hhmm(m.created_at)}</div>
       </div>
     </div>`;

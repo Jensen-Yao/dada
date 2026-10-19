@@ -75,6 +75,10 @@ miscRouter.get('/recommend', optionalAuth, (req, res) => {
 // ---------- 相似搭子推荐（看我参加过的分类） ----------
 miscRouter.get('/for-you', requireAuth, (req, res) => {
   const me = req.user;
+  // 个性化推荐关闭（算法推荐规定17条）：立即生效，返回空列表 + rec_off 标记供前端降级为热门流
+  if (me.rec_off) {
+    return res.json(ok({ list: [], rec_off: true }));
+  }
   const myCats = db.prepare(`
     SELECT p.category, COUNT(*) c FROM posts p JOIN joins j ON j.post_id = p.id
     WHERE j.user_id = ? GROUP BY p.category ORDER BY c DESC LIMIT 3

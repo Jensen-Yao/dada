@@ -20,8 +20,10 @@ try {
   db.exec("ALTER TABLE posts ADD COLUMN images TEXT NOT NULL DEFAULT '[]'");
 } catch { /* 列已存在 */ }
 
-db.exec(`
-CREATE TABLE IF NOT EXISTS users (
+// users 表结构（v2 合规专项）：新增 phone / adult_confirmed / rec_off 列；
+// status 新增 'deleted'（账号注销，PIPL 47条 + Apple 5.1.1(v)）
+const USERS_TABLE_SQL = `
+CREATE TABLE %s (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   username TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
@@ -42,11 +44,48 @@ CREATE TABLE IF NOT EXISTS users (
   is_admin INTEGER NOT NULL DEFAULT 0,
   credit INTEGER NOT NULL DEFAULT 600,
   warnings INTEGER NOT NULL DEFAULT 0,
-  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','banned')),
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','banned','deleted')),
+  phone TEXT DEFAULT NULL,
+  adult_confirmed INTEGER NOT NULL DEFAULT 0,
+  rec_off INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   last_active_at INTEGER NOT NULL
-);
+);`;
 
+// 迁移：老库 users 表 CHECK 约束不含 'deleted'，SQLite 无法 ALTER CHECK，需整表重建
+// （标准五步法：关外键 → 建新表 → 拷数据 → 删旧表 → 改名，均在事务内）
+try {
+  const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'").get();
+  if (row && !row.sql.includes("'deleted'")) {
+    const COLS = 'id, username, password_hash, nickname, avatar, gender, birth_year, city, district, school, occupation, mbti, bio, tags, verify_student, verify_real, verify_pending, is_admin, credit, warnings, status, created_at, last_active_at';
+    db.exec('PRAGMA foreign_keys = OFF;');
+    db.exec('BEGIN;');
+    db.exec(USERS_TABLE_SQL.replace('%s', 'users_new'));
+    db.exec(`INSERT INTO users_new (${COLS}) SELECT ${COLS} FROM users;`);
+    db.exec('DROP TABLE users;');
+    db.exec('ALTER TABLE users_new RENAME TO users;');
+    db.exec('COMMIT;');
+    db.exec('PRAGMA foreign_keys = ON;');
+    console.log('[dada] 迁移完成：users.status 支持 deleted（账号注销）');
+  }
+} catch (e) {
+  console.error('[dada] users 表迁移失败：', e.message);
+}
+
+// 轻量迁移：合规新增列（老库兼容；新库建表已含，ALTER 会因列已存在而被吞掉）
+try {
+  db.exec('ALTER TABLE users ADD COLUMN phone TEXT DEFAULT NULL;');
+} catch { /* 列已存在 */ }
+try {
+  db.exec('ALTER TABLE users ADD COLUMN adult_confirmed INTEGER NOT NULL DEFAULT 0;');
+} catch { /* 列已存在 */ }
+try {
+  db.exec('ALTER TABLE users ADD COLUMN rec_off INTEGER NOT NULL DEFAULT 0;');
+} catch { /* 列已存在 */ }
+
+db.exec(USERS_TABLE_SQL.replace('%s', 'IF NOT EXISTS users'));
+
+db.exec(`
 CREATE TABLE IF NOT EXISTS posts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL REFERENCES users(id),

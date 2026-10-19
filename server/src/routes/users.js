@@ -2,6 +2,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import path from 'node:path';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { db, now } from '../db.js';
 import { requireAuth, optionalAuth, ok, publicUser, notify, addCredit, anyBlocked, safeJSON } from '../util.js';
@@ -68,6 +69,13 @@ usersRouter.put('/me', requireAuth, (req, res) => {
     sets.push(`${k} = ?`);
     vals.push(v);
   }
+  // 个性化推荐开关（算法推荐规定17条：提供关闭选项，立即生效）
+  if (body.rec_off !== undefined) {
+    const v = Number(body.rec_off);
+    if (v !== 0 && v !== 1) return res.status(400).json({ error: 'rec_off 参数不合法（0 或 1）' });
+    sets.push('rec_off = ?');
+    vals.push(v);
+  }
   if (Array.isArray(body.tags)) {
     const tags = body.tags.map(String).slice(0, 10).map((t) => t.slice(0, 12));
     sets.push('tags = ?');
@@ -79,6 +87,26 @@ usersRouter.put('/me', requireAuth, (req, res) => {
   }
   const u = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
   res.json(ok(publicUser(u)));
+});
+
+// ---------- 注销账号（PIPL 47条 + Apple 5.1.1(v)） ----------
+// 需输入字符串 DELETE 二次确认；注销后：状态置 deleted、个人资料清空、
+// 密码 hash 换为随机串（任何密码都无法登录）、手机号释放可复用；
+// 历史搭局帖子保留（组局完整性），作者侧显示"已注销用户"。
+usersRouter.post('/me/delete', requireAuth, (req, res) => {
+  const { confirm } = req.body || {};
+  if (confirm !== 'DELETE') {
+    return res.status(400).json({ error: '请输入 DELETE 以确认注销' });
+  }
+  const randomHash = `deleted:${crypto.randomBytes(24).toString('hex')}`; // 非合法 bcrypt 哈希，原密码必失效
+  db.prepare(`
+    UPDATE users SET
+      status = 'deleted', nickname = '已注销用户',
+      bio = '', school = '', occupation = '', mbti = '', tags = '[]',
+      avatar = NULL, phone = NULL, password_hash = ?
+    WHERE id = ?
+  `).run(randomHash, req.user.id);
+  res.json(ok({ deleted: true }));
 });
 
 // ---------- 头像上传 ----------

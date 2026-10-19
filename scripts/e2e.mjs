@@ -9,7 +9,7 @@
  *
  * 覆盖真实用户旅程 8 步（每步断言，失败打印明细，exit 0/1）：
  *   1. 游客广场瀑布流 ≥8 卡片、无 console error
- *   2. 注册新用户（用户名带时间戳，可重复运行）→ 登录态生效
+ *   2. 注册新用户（用户名带时间戳，走注册 API——UI 注册已改手机号验证码模式）→ 登录态生效
  *   3. 发布搭局（food / 标题含 QA回归）→ 详情页 + 招募中
  *   4. 第二用户申请 → 组局者通过 → 帖子变已满员
  *   5. 第二用户发含敏感词消息 → 气泡内容被打码（**）
@@ -50,19 +50,20 @@ async function api(method, p, token, body) {
   return { status: res.status, json };
 }
 
-/** 注册新用户（走注册页 UI），返回 token */
+/** 注册新用户（走注册 API——注册 UI 已改为手机号+验证码合规模式，用户名注册仅保留 API 通道），返回 token */
 async function registerUser(page, username, nickname) {
+  const r = await api('POST', '/auth/register', null, { username, password: PASSWORD, nickname });
+  if (r.status !== 200 || !r.json?.ok) throw new Error(`API 注册失败(${r.status}): ${r.json?.error || '未知错误'}`);
+  const { token, user } = r.json.data;
   await page.goto(BASE + '/#/login');
-  await page.waitForSelector('#btn-switch');
-  await page.click('#btn-switch'); // 切到注册模式
-  await page.waitForSelector('#f-nick', { state: 'visible' });
-  await page.fill('#f-user', username);
-  await page.fill('#f-pass', PASSWORD);
-  await page.fill('#f-nick', nickname);
-  await page.click('#btn-go');
-  await page.waitForFunction(() => !!localStorage.getItem('dada_token'), null, { timeout: 10000 });
-  await page.waitForFunction(() => location.hash === '#/square', null, { timeout: 10000 });
-  return page.evaluate(() => localStorage.getItem('dada_token'));
+  await page.evaluate(({ token, user }) => {
+    localStorage.setItem('dada_token', token);
+    localStorage.setItem('dada_user', JSON.stringify(user));
+  }, { token, user });
+  await page.goto(BASE + '/#/square');
+  await page.reload(); // 重建登录态（WS 连接等随 DOMContentLoaded 初始化）
+  await page.waitForFunction(() => location.hash === '#/square' && !!localStorage.getItem('dada_token'), null, { timeout: 10000 });
+  return token;
 }
 
 console.log(`🧪 搭搭 E2E 回归 → ${BASE}`);
