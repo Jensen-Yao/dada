@@ -1009,4 +1009,135 @@ test('合规-静态法律页：/legal/privacy 与 /legal/terms 服务端直出 2
   assert.ok(html3.includes('返回App'));
 });
 
+// ==================================================================
+// v2.9 匹配算法升级（MT-01/02/05）：确定性多维评分 / for-you 接入 / 冷启动
+// ==================================================================
+
+test('MT-05-1 mbtiScore锚点 + WEIGHTS权重守恒', async () => {
+  const { mbtiScore, WEIGHTS } = await import('../src/match.js');
+  // H.1 矩阵锚点（验收清单 MT 抽查项）
+  assert.equal(mbtiScore('INTJ', 'ENFP'), 1.0, 'INTJ×ENFP 四维全优 = 1.0');
+  assert.equal(mbtiScore('INTJ', 'INTP'), 0.8, 'INTJ×INTP（E/I、T/F 同类）= 0.8');
+  assert.equal(mbtiScore('INTJ', 'ISTJ'), 0.55, 'INTJ×ISTJ（N/S 错配 + 三维同类）= 0.55');
+  // 任一方为空 → 该维度剔除（mbtiScore 返回 null，不参与评分）
+  assert.equal(mbtiScore('INTJ', ''), null, 'empty author mbti → null');
+  assert.equal(mbtiScore('', 'ENFP'), null, 'empty my mbti → null');
+  // 权重守恒：Σw = 100（30+15+20+20+10+5）
+  assert.deepEqual(WEIGHTS, { tags: 30, mbti: 15, city: 20, category: 20, credit: 10, active: 5 });
+  assert.equal(Object.values(WEIGHTS).reduce((s, w) => s + w, 0), 100);
+});
+
+test('MT-05-2 matchScore确定性与Jaccard手工算例', async () => {
+  const { matchScore } = await import('../src/match.js');
+  const input = {
+    myTags: ['a', 'b'], authorTags: ['b', 'c'],                        // Jaccard = |{b}|/|{a,b,c}| = 1/3
+    myMbti: 'INTJ', authorMbti: 'ENFP',                                // 1.0
+    myCity: '北京', postCity: '北京',                                    // 同城 = 1
+    myCatHistory: ['food', 'food', 'sports'], postCategory: 'food',    // 分类占比 = 2/3
+    authorCredit: 600,                                                 // (600-300)/500 = 0.6
+    authorActive: true,                                                // 1
+  };
+  // 手工：Σ = 30×(1/3) + 15×1 + 20×1 + 20×(2/3) + 10×0.6 + 5×1 = 69.33… → round → 69
+  assert.equal(matchScore(input), 69, 'hand-computed weighted score');
+  // 确定性：同输入两次调用逐位相等
+  assert.equal(matchScore(input), matchScore({ ...input }));
+  // Jaccard 单点验证：{a,b}×{b,c} = 1/3（其余维度剔除，credit=300→0、active=false→0）
+  // 仅剩 tags+credit+active：30×(1/3)/45 = 22.22… → 22
+  assert.equal(
+    matchScore({ myTags: ['a', 'b'], authorTags: ['b', 'c'], authorCredit: 300, authorActive: false }),
+    22
+  );
+  // 输入完全缺失 → 全维度剔除 → null
+  assert.equal(matchScore({}), null);
+});
+
+test('MT-05-3 空值剔除：只有credit+active时按这两项加权归一', async () => {
+  const { matchScore, WEIGHTS } = await import('../src/match.js');
+  const r = matchScore({
+    myTags: [], authorTags: [], myMbti: '', authorMbti: '',
+    myCity: '', postCity: '', myCatHistory: [], postCategory: 'food',
+    authorCredit: 600, authorActive: true,
+  });
+  // (10×0.6 + 5×1) / (10+5) = 11/15 = 0.7333… → 73（空值分摊：其余维度权重从分母消失）
+  const expect = Math.round(100 * (WEIGHTS.credit * 0.6 + WEIGHTS.active * 1) / (WEIGHTS.credit + WEIGHTS.active));
+  assert.equal(r, expect, 'score = weighted normalization over credit+active only');
+  assert.equal(r, 73);
+});
+
+test('MT-05-4 /for-you 登录用户返回match_score与match_reasons', async () => {
+  // 构造：注册用户设 tags 含「美食」「电影」、同城北京、mbti=ENFJ
+  // → xiaoyu（北京 / tags 含美食电影 / INFP）的日料帖应命中 共同兴趣 + 同城 + MBTI互补
+  const reg = await api('POST', '/api/auth/register', {
+    username: 'matcher_fy', password: '123456', nickname: '匹配测', gender: 'female',
+  });
+  assert.equal(reg.status, 200);
+  const t = reg.json.data.token;
+  const edit = await api('PUT', '/api/users/me', { tags: ['美食', '电影'], city: '北京', mbti: 'ENFJ' }, t);
+  assert.equal(edit.status, 200);
+
+  const fy = await api('GET', '/api/for-you', null, t);
+  assert.equal(fy.status, 200);
+  assert.equal(fy.json.data.cold_start, false, 'personalized user is not cold start');
+  assert.deepEqual(fy.json.data.my_tags, ['美食', '电影']);
+  assert.equal(fy.json.data.my_city, '北京');
+  assert.ok(fy.json.data.list.length > 0, 'for-you should have items');
+  for (const p of fy.json.data.list) {
+    assert.ok(Number.isInteger(p.match_score) && p.match_score >= 0 && p.match_score <= 100, 'match_score is int 0-100');
+    assert.ok(Array.isArray(p.match_reasons) && p.match_reasons.length <= 3, 'match_reasons is array of at most 3');
+  }
+  // 排序：match_score 降序，同分 id 降序
+  const list = fy.json.data.list;
+  for (let i = 1; i < list.length; i++) {
+    const [a, b] = [list[i - 1], list[i]];
+    assert.ok(a.match_score > b.match_score || (a.match_score === b.match_score && a.id > b.id),
+      'sorted by match_score desc then id desc');
+  }
+  // 确定性：同用户连调两次，全量评分与理由逐帖一致
+  const fy2 = await api('GET', '/api/for-you', null, t);
+  assert.deepEqual(fy2.json.data.list, fy.json.data.list, 'same user twice → identical scores & reasons');
+  // 命中种子帖「周六中午五道口吃日料放题」（xiaoyu·北京·food·tags含美食电影）
+  const foodPost = list.find((p) => p.title.includes('日料放题'));
+  assert.ok(foodPost, 'seeded xiaoyu food post should appear in top 20');
+  assert.ok(foodPost.match_reasons.includes('2个共同兴趣'), 'reasons: ' + JSON.stringify(foodPost.match_reasons));
+  assert.ok(foodPost.match_reasons.includes('同城·北京'), 'reasons: ' + JSON.stringify(foodPost.match_reasons));
+  assert.ok(foodPost.match_reasons.includes('MBTI互补'), 'ENFJ×INFP=0.9 → MBTI互补');
+});
+
+test('MT-05-5 冷启动：cold_start=true无match_score；补标签后恢复；rec_off回归', async () => {
+  // 新注册：无标签 / 无城市 / 无MBTI / 无历史 → 冷启动，热门序，不出评分
+  const reg = await api('POST', '/api/auth/register', {
+    username: 'cold_fresh', password: '123456', nickname: '冷启动', gender: 'male',
+  });
+  assert.equal(reg.status, 200);
+  const t = reg.json.data.token;
+  const fy = await api('GET', '/api/for-you', null, t);
+  assert.equal(fy.status, 200);
+  assert.equal(fy.json.data.cold_start, true, 'fresh user without tags/city/mbti/history → cold_start');
+  assert.ok(fy.json.data.list.length > 0, 'cold start still returns hot list');
+  for (const p of fy.json.data.list) {
+    assert.equal('match_score' in p, false, 'cold-start items carry no match_score');
+    assert.equal('match_reasons' in p, false, 'cold-start items carry no match_reasons');
+  }
+  // 热门序与 /recommend 完全一致（likes + comments×2 降序，同分 id 降序）
+  const rec = await api('GET', '/api/recommend', null, t);
+  assert.equal(rec.status, 200);
+  assert.deepEqual(
+    fy.json.data.list.map((p) => p.id),
+    rec.json.data.list.map((p) => p.id),
+    'cold-start list ids == hot ranking ids'
+  );
+  // 补标签后冷启动消失，恢复出个性化评分
+  const edit = await api('PUT', '/api/users/me', { tags: ['美食'] }, t);
+  assert.equal(edit.status, 200);
+  const fy2 = await api('GET', '/api/for-you', null, t);
+  assert.equal(fy2.json.data.cold_start, false, 'cold_start disappears after setting tags');
+  assert.ok(fy2.json.data.list.length > 0);
+  assert.ok(fy2.json.data.list.every((p) => Number.isInteger(p.match_score)), 'scored items all carry integer match_score');
+  // rec_off=1 行为不回退：空列表 + rec_off 标记
+  await api('PUT', '/api/users/me', { rec_off: 1 }, t);
+  const fy3 = await api('GET', '/api/for-you', null, t);
+  assert.deepEqual(fy3.json.data.list, [], 'rec_off → empty list');
+  assert.equal(fy3.json.data.rec_off, true, 'rec_off flag for frontend fallback');
+});
+
 console.log('\n✅ 全部 API 测试通过');

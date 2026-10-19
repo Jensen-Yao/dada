@@ -598,3 +598,71 @@
   color: var(--danger);
   margin: 6px 0 0;
 }
+
+/* ============================================================
+   7. 发现页 v2.9 匹配可视化（MT-03）+ 注册引导（MT-04）
+   ============================================================ */
+
+/* --- MT-03 匹配度徽章：封面右上角三档色（≥80 橙 / 60-79 绿 / <60 灰）--- */
+.match-badge {
+  position: absolute; right: 8px; top: 8px; z-index: 3;
+  color: #fff; font-size: 11px; font-weight: 700; line-height: 1;
+  padding: 4.5px 9px; border-radius: 99px;
+  box-shadow: 0 2px 6px rgba(34, 36, 38, 0.22);
+  pointer-events: none; white-space: nowrap;
+}
+.match-badge.hot { background: var(--grad-primary); }
+.match-badge.mid { background: var(--success); }
+.match-badge.low { background: #9AA0A6; }
+/* 封面右上已有"仅限女生/男生"角标时，徽章下移避让 */
+.match-badge.stacked { top: 40px; }
+
+/* --- MT-03 理由 chips：卡片作者行下，浅灰底圆角小 chip --- */
+.match-chips {
+  display: flex; flex-wrap: wrap; gap: 4px;
+  margin-top: 7px; padding-top: 7px; border-top: 0.5px solid var(--line);
+}
+.match-chips .match-chip {
+  font-size: 12px; padding: 2px 8px; border-radius: 99px;
+  background: #F2F3F5; color: var(--text-2); font-weight: 500;
+  max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* --- MT-03 冷启动提示条：推荐区块顶部，浅橙底 + info 图标，整条可点 --- */
+.cold-tip {
+  margin: 10px 14px 0;
+  display: flex; align-items: center; gap: 7px;
+  background: #FFF4EC;
+  border: 0.5px solid #FFE3D2;
+  color: var(--primary-deep);
+  font-size: var(--fs-sm); font-weight: 600;
+  padding: 10px 12px; border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.cold-tip svg { flex-shrink: 0; }
+.cold-tip-text { flex: 1; min-width: 0; }
+.cold-tip-btn {
+  flex-shrink: 0; font-weight: 700; font-size: var(--fs-sm);
+  background: var(--primary); color: #fff;
+  padding: 4px 12px; border-radius: 99px;
+}
+
+/* --- MT-04 注册后一次性引导 sheet：28 标签 4 列网格 + 城市 + 完成/跳过 --- */
+.ob-sheet .ob-sub {
+  font-size: 12.5px; color: var(--text-3); text-align: center;
+  margin: -2px 0 12px; line-height: 1.6;
+}
+.ob-tags {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px 5px;
+}
+.ob-tags .tag {
+  margin: 0; justify-content: center; text-align: center;
+  padding: 7px 2px; border-radius: 10px; cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ob-tags .tag.on { border: 1px solid var(--primary); padding: 6px 1px; }
+.ob-sheet #ob-done.dim { opacity: 0.45; }
+.ob-skip {
+  text-align: center; margin-top: 14px;
+  font-size: 13px; color: var(--text-3); cursor: pointer; padding: 4px 0;
+}

@@ -3,6 +3,7 @@ import { db, now } from '../db.js';
 import { requireAuth, optionalAuth, ok, safeJSON, CATEGORIES, CATEGORY_MAP, FEE_MODES, GENDER_REQS, RATE_TAGS } from '../util.js';
 import { myPostsRouter, postsRouter, coverFields } from './posts.js';
 import { reportRouter } from './users.js';
+import { matchScore, mbtiScore, cityScore } from '../match.js';
 
 export const miscRouter = Router();
 
@@ -72,48 +73,96 @@ miscRouter.get('/recommend', optionalAuth, (req, res) => {
   res.json(ok({ list }));
 });
 
-// ---------- 相似搭子推荐（看我参加过的分类） ----------
+// ---------- 为你推荐（v2.9 MT-02：确定性多维匹配评分，核心公式见 src/match.js 与规格 §H.0） ----------
 miscRouter.get('/for-you', requireAuth, (req, res) => {
   const me = req.user;
   // 个性化推荐关闭（算法推荐规定17条）：立即生效，返回空列表 + rec_off 标记供前端降级为热门流
   if (me.rec_off) {
     return res.json(ok({ list: [], rec_off: true }));
   }
-  const myCats = db.prepare(`
-    SELECT p.category, COUNT(*) c FROM posts p JOIN joins j ON j.post_id = p.id
-    WHERE j.user_id = ? GROUP BY p.category ORDER BY c DESC LIMIT 3
-  `).all(me.id).map((r) => r.category);
+  // 我方上下文：标签 / MBTI / 城市 / 分类历史（参加通过的局 + 自己发布的局，含重复次数）
   const myTags = safeJSON(me.tags, []);
-  if (!myCats.length) {
-    myCats.push(...db.prepare('SELECT category FROM posts WHERE user_id = ? GROUP BY category LIMIT 3').all(me.id).map((r) => r.category));
+  const myMbti = me.mbti || '';
+  const myCity = me.city || '';
+  const myCatHistory = [
+    ...db.prepare(`
+      SELECT p.category FROM posts p JOIN joins j ON j.post_id = p.id
+      WHERE j.user_id = ? AND j.status = 'approved'
+    `).all(me.id).map((r) => r.category),
+    ...db.prepare('SELECT category FROM posts WHERE user_id = ?').all(me.id).map((r) => r.category),
+  ];
+
+  // 候选池（H.0）：开放帖 + 作者活跃 + 非本人 + 拉黑过滤；池内全量评分，不做任何随机打乱
+  const rows = db.prepare(`
+    SELECT p.* FROM posts p JOIN users u ON p.user_id = u.id
+    WHERE p.status = 'open' AND u.status = 'active' AND p.user_id != ?
+      AND p.user_id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = ? UNION SELECT blocker_id FROM blocks WHERE blocked_id = ?)
+  `).all(me.id, me.id, me.id);
+
+  const getAuthor = db.prepare('SELECT * FROM users WHERE id = ?');
+  const toView = (p, author, tagOverlap) => ({
+    id: p.id, title: p.title, category: p.category,
+    category_name: CATEGORY_MAP[p.category]?.name, category_icon: CATEGORY_MAP[p.category]?.icon,
+    city: p.city, meet_time: p.meet_time,
+    images: safeJSON(p.images, []),
+    ...coverFields(p),
+    author: { id: author.id, nickname: author.nickname, avatar: author.avatar },
+    // 旧字段保留（兼容未升级卡片）
+    tag_overlap: tagOverlap,
+    reason: tagOverlap.length ? `你们都爱「${tagOverlap[0]}」` : `${CATEGORY_MAP[p.category]?.name || '搭子'} · 可能合拍`,
+  });
+
+  // 冷启动（MT-02-4）：标签/MBTI/城市/分类历史四项全空 → 无可个性化维度（仅剩 credit+active），
+  // 不出评分，降级为热门 20 条（与 /recommend 同款热度公式），每条不带 match_score
+  if (!myTags.length && !myMbti && !myCity && !myCatHistory.length) {
+    const hot = rows
+      .slice()
+      .sort((a, b) => (b.likes_count + b.comments_count * 2) - (a.likes_count + a.comments_count * 2) || b.id - a.id)
+      .slice(0, 20)
+      .map((p) => toView(p, getAuthor.get(p.user_id), []));
+    return res.json(ok({ list: hot, cold_start: true, my_tags: myTags, my_city: myCity, my_categories: [] }));
   }
-  let rows = [];
-  if (myCats.length) {
-    const ph = myCats.map(() => '?').join(',');
-    rows = db.prepare(`
-      SELECT p.*, COUNT(*) match_c FROM posts p
-      WHERE p.status = 'open' AND p.user_id != ? AND p.category IN (${ph})
-        AND p.user_id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = ? UNION SELECT blocker_id FROM blocks WHERE blocked_id = ?)
-      ORDER BY match_c DESC, p.id DESC LIMIT 20
-    `).all(me.id, ...myCats, me.id, me.id);
-  }
-  // 标签匹配加成
+
+  // 作者侧上下文：7 日内发过帖或评论（活跃度，SQL 一次性判定）
+  const weekAgo = now() - 7 * 86400000;
+  const activeSet = new Set(db.prepare(`
+    SELECT user_id FROM posts WHERE created_at >= ?
+    UNION
+    SELECT user_id FROM comments WHERE created_at >= ?
+  `).all(weekAgo, weekAgo).map((r) => r.user_id));
+
   const list = rows.map((p) => {
-    const author = db.prepare('SELECT * FROM users WHERE id = ?').get(p.user_id);
+    const author = getAuthor.get(p.user_id);
     const authorTags = safeJSON(author.tags, []);
     const tagOverlap = myTags.filter((t) => authorTags.includes(t));
-    return {
-      id: p.id, title: p.title, category: p.category,
-      category_name: CATEGORY_MAP[p.category]?.name, category_icon: CATEGORY_MAP[p.category]?.icon,
-      city: p.city, meet_time: p.meet_time,
-      images: safeJSON(p.images, []),
-      ...coverFields(p),
-      author: { id: author.id, nickname: author.nickname, avatar: author.avatar },
-      tag_overlap: tagOverlap,
-      reason: tagOverlap.length ? `你们都爱「${tagOverlap[0]}」` : `${CATEGORY_MAP[p.category]?.name} · 可能合拍`,
-    };
-  }).sort((a, b) => b.tag_overlap.length - a.tag_overlap.length);
-  res.json(ok({ list, my_categories: myCats, my_tags: myTags }));
+    const mbti = mbtiScore(myMbti, author.mbti);
+    const city = cityScore(myCity, p.city);
+    const catScore = myCatHistory.length
+      ? myCatHistory.filter((c) => c === p.category).length / myCatHistory.length
+      : null;
+    const score = matchScore({
+      myTags, authorTags, myMbti, authorMbti: author.mbti,
+      myCity, postCity: p.city, myCatHistory, postCategory: p.category,
+      authorCredit: author.credit, authorActive: activeSet.has(author.id),
+    });
+    // match_reasons（≤3 条，枚举文案，固定顺序：标签→同城/同省→MBTI→分类→信用）
+    const reasons = [];
+    if (tagOverlap.length) reasons.push(`${tagOverlap.length}个共同兴趣`);
+    if (city === 1) reasons.push(`同城·${p.city}`);
+    else if (city === 0.6) reasons.push(`同省·${p.city.slice(0, 2)}`);
+    if (mbti !== null && mbti >= 0.75) reasons.push('MBTI互补');
+    if (catScore !== null && catScore > 0) reasons.push(`常玩${CATEGORY_MAP[p.category]?.name || '搭子'}`);
+    if (author.credit >= 650) reasons.push('高信用搭友');
+    return { ...toView(p, author, tagOverlap), match_score: score, match_reasons: reasons.slice(0, 3) };
+  }).sort((a, b) => b.match_score - a.match_score || b.id - a.id).slice(0, 20);
+
+  res.json(ok({
+    list,
+    cold_start: false,
+    my_tags: myTags,
+    my_city: myCity,
+    my_categories: [...new Set(myCatHistory)], // 兼容旧字段
+  }));
 });
 
 // 挂载子路由

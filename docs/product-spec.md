@@ -913,3 +913,106 @@ navbar 标题纯文本；顶部 SOS 主按钮：大号 `phone-call` 图标 + 「
 3. **40 测试全绿**：`api.test.js` 用例数不变（L582 断言改 `c.icon`），`npm test` 通过。
 4. **白名单清单（允许残留，仅此 2 处）**：`server/src/seed.js` L12 bio「🐟」、L144 聊天消息「🍣」——均为 UGC 正文、每条 1 个、非标题非结构字段。其余任何文件不得命中。
 5. 回归红线不破坏：封面三级兜底、头像 onerror 链、TabBar 角标刷新、瀑布流确定性公式（`id%N`）均保持原行为。
+
+## H. v2.9 匹配算法升级（MT-xx）
+
+> 背景：现行 `/for-you`（misc.js L76-117）只做"历史参加分类过滤 + 标签重合数排序"，`/recommend`（L43-73）纯热度。v2.9 引入确定性多维评分模型：0-100、纯函数、可解释、同输入必同输出（与瀑布流 `id%N` 同款确定性红线）。
+
+### H.0 评分总公式（MT-01 后端核心）
+
+```
+match_score = round( 100 × Σ(wᵢ × sᵢ) / Σ(wᵢ) )   // 只累加"可用维度"，clamp 0-100
+```
+
+| 维度 | 权重 w | 子分 sᵢ（0~1） | 空值判定（该维度剔除而非计0） |
+|---|---|---|---|
+| 兴趣标签 Jaccard | 30 | `|交集(my.tags, author.tags)| / |并集|`；双方都无标签→剔除 | my.tags 为空 **或** author.tags 为空 |
+| MBTI 兼容性 | 15 | 4维度逐项25%，见 H.1 矩阵 | 任一方 mbti 为空串 |
+| 同城 | 20 | 完全相等=1；同省=0.6；否则0 | me.city 或 p.city 为空 |
+| 分类偏好 | 20 | 该帖 category 在我"参加+发布"历史分类总次数中的占比（无历史→剔除） | 历史分类计数为空 |
+| 搭力值信用 | 10 | `clamp((author.credit-300)/500, 0, 1)` | —（credit 有默认值，恒可用） |
+| 活跃度 | 5 | 作者7日内发过帖或评论=1，否则0（SQL EXISTS 判定） | —（恒可用） |
+
+- **空值分摊**：被剔除维度的权重从分母消失，等价于按比例分摊给其余维度；用户全空（无标签无MBTI无历史无城市）→ 冷启动路径（MT-02），不出评分。
+- 同省判定：城市串为"北京"样式（见 /cities 与 login f-city），取前 2 字相同视为同省；无法判定按 0。允许实现简化为"同城1否则0"，PM 验收以实际代码为准登记。
+- 候选池：`status='open' AND author.status='active' AND p.user_id != me AND 拉黑过滤`，取池内全量评分后排序，**不做任何随机打乱**。
+
+### H.1 MBTI 兼容矩阵（每维度命中=25%）
+
+| 维度 | 组合 | 计分 | 规则 |
+|---|---|---|---|
+| ① E/I | E×I 或 I×E | 25% | 互补 |
+| ① E/I | E×E 或 I×I | 15% | 同类（次优） |
+| ② N/S | N×N 或 S×S | 25% | **同质** |
+| ② N/S | N×S 或 S×N | 10% | 错配 |
+| ③ T/F | T×F 或 F×T | 25% | 互补 |
+| ③ T/F | T×T 或 F×F | 15% | 同类 |
+| ④ J/P | J×P 或 P×J | 25% | 互补 |
+| ④ J/P | J×J 或 P×P | 15% | 同类 |
+
+实现为 16×16 常量表或 4 组 if 均可，但必须落成纯函数 `mbtiScore(a, b)`，供测试直接调用。
+
+### MT-02 /for-you 接口升级（BE，misc.js）
+
+1. 响应每帖新增：`match_score`（整数 0-100）、`match_reasons`（字符串数组，≤3条）；保留 `tag_overlap`/`reason` 旧字段兼容未升级卡片。
+2. `match_reasons` 生成（确定性，按维度贡献分降序取前3，同分按 H.0 表序）：
+   - 标签交集 n≥1 → `「${n}个共同兴趣」`；n≥3 时可加首标签名 `你们都爱「X」`（二选一，代码定死）
+   - 同城 s=1 → `同城·${city}`；同省 → `同省·${省}`
+   - MBTI 子分=100% → `MBTI互补`；≥50% → `MBTI相合`
+   - 分类占比 ≥0.5 → `常参加${分类名}`
+   - credit ≥800 → `高信用搭友`；活跃度=1 → `本周活跃`
+3. 排序：`match_score` 降序，同分按 `id` 降序；返回条数维持 20。
+4. 冷启动（my.tags空 && mbti空 && 无参加/发布历史 && city空）：返回 `{ cold_start:true, list:<热门20条（/recommend同款热度序）> }`，每条不带 match_score。
+5. `rec_off` 行为不变（返回空列表+rec_off:true）。
+
+### MT-03 发现页匹配可视化（FE，discover.js）
+
+- 为你推荐卡片右上角匹配度徽章：≥80 橙色文案"高度匹配"、60-79 绿色、<60 灰色，均显示整数如 `92%`（徽章不遮封面兜底图第三级）。
+- 卡片下方理由 chips：渲染 `match_reasons`，样式复用 `.pill` 灰底 11px，最多3枚。
+- `cold_start:true` 时区块顶部提示条：`选择兴趣标签，解锁精准匹配` + 按钮「去设置」跳 `#/edit-profile`；列表照常展示热门。
+- 样式落 `web/public/css/extensions.css`（.match-badge/.match-chips/.cold-tip 三组类），零 emoji（G 章红线延续）。
+
+### MT-04 注册后引导（FE，login.js + discover.js；冷启动闭环）
+
+1. 注册成功（login.js register 分支）写 `localStorage.dada_need_onboard = '1'`。
+2. 登录态进入发现页且 `dada_need_onboard==='1'` 且 `dada_onboarded` 未设：弹一次性 sheet（UI.sheet）：
+   - 标签网格复用 misc.js 编辑资料的 28 标签池，选 3-10 个（不足3禁用保存，>10 拒选）
+   - 城市输入框（预填注册时城市）
+   - 「保存」→ `PUT /users/me { tags, city }`（后端已支持 tags ≤10 条、每条 ≤12 字，见 users.js L78-83）→ 写 `dada_onboarded='1'` 清 `need_onboard` → toast「已保存，推荐已更新」并刷新发现页
+   - 「跳过」→ 只写 `dada_onboarded='1'`，此后永不弹
+3. 已注册老用户不弹（无 need_onboard 标记即静默）。
+
+### MT-05 测试（test/api.test.js 追加）
+
+1. 确定性：同一用户连调两次 `/for-you`，全量 `match_score`/`match_reasons` 逐帖相等。
+2. 权重守恒：`src/match.js` 导出 `WEIGHTS`，断言 `Σ=100`（30+15+20+20+10+5）。
+3. 冷启动：新注册无标签用户 → `cold_start===true` 且 list 首条=热门首条；补标签后 `cold_start` 消失。
+4. reasons：构造 标签交集2 + 同城 + MBTI互补 用户，断言含「2个共同兴趣」「同城·X」「MBTI互补」且 ≤3 条。
+5. 回归：`rec_off` 用例、`/recommend`、40 条旧测试全绿。
+
+### H.2 新增/改动文件与分工
+
+| 端 | 文件 | 内容 |
+|---|---|---|
+| BE 新增 | `server/src/match.js` | 纯函数：`matchScore(me, post, author, ctx)`、`mbtiScore(a,b)`、`WEIGHTS` 导出 |
+| BE 改 | `server/src/routes/misc.js` | `/for-you` 接入评分、reasons、冷启动；`/recommend` 不动 |
+| BE 改 | `server/test/api.test.js` | MT-05 五组用例 |
+| FE 改 | `web/public/js/pages/discover.js` | 徽章+chips+冷启动提示条+MT-04 引导 sheet |
+| FE 改 | `web/public/js/pages/login.js` | 注册成功写 `dada_need_onboard` |
+| FE 改 | `web/public/css/extensions.css` | .match-badge / .match-chips / .cold-tip / .onboard-sheet 样式 |
+
+### H.3 验收清单（PM 逐项勾选）
+
+- [ ] `GET /for-you` 每帖含整数 `match_score`(0-100) 与 `match_reasons`(≤3条)
+- [ ] 同用户两次请求评分逐帖一致（MT-05-1 绿）
+- [ ] WEIGHTS 求和=100 断言存在且通过
+- [ ] 用户无标签时其余维度分值上升（空值分摊生效，非全0）
+- [ ] 冷启动用户返回 `cold_start:true` 且列表=热门序
+- [ ] 冷启动提示条出现且「去设置」可达编辑资料页
+- [ ] 徽章三档配色正确（≥80橙/60-79绿/<60灰），显示如 `92%`
+- [ ] 理由 chips ≤3 枚、文案与后端完全一致
+- [ ] 新注册触发一次引导 sheet；跳过后清缓存重进不再弹
+- [ ] 引导保存后 tags/city 落库（GET /auth/me 可见），推荐刷新出个性化结果
+- [ ] `rec_off` 用户行为不回退（空列表+提示条）
+- [ ] MBTI 矩阵抽查：INTJ×ENFP=100%（四维全优）、INTJ×INTP=80%、INTJ×ISTJ=55%（N/S 错配）
+- [ ] 全站无 emoji 回归 + `npm test` 全绿

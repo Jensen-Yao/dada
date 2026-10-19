@@ -149,6 +149,8 @@ App.register('login', async (el) => {
             gender: $('f-gender').value, city: $('f-city').value.trim(),
           });
         }
+        // MT-04：注册成功写一次性引导标记（discover.js 进发现页时弹"让搭搭更懂你"引导）
+        if (mode === 'register') localStorage.setItem('dada_need_onboard', '1');
         API.setSession(data.token, data.user);
         WS.connect();
         UI.toast(mode === 'login' ? `欢迎回来，${data.user.nickname}` : `欢迎加入搭搭，${data.user.nickname}！`);
