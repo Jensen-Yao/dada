@@ -104,15 +104,26 @@ App.register('conv', async (el, seg) => {
     menu.style.left = `${Math.max(8, Math.min(window.innerWidth - mw - 8, x - mw / 2))}px`;
     menu.style.top = `${Math.max(8, Math.min(window.innerHeight - mh - 8, y - mh - 14))}px`;
     bubbleMenu = menu;
-    menu.querySelector('[data-act="report"]')?.addEventListener('click', async () => {
+    menu.querySelector('[data-act="report"]')?.addEventListener('click', () => {
       closeBubbleMenu();
-      try {
-        await API.post(`/users/${other.id}/report`, {
-          reason: '骚扰',
-          detail: `会话#${currentConvId} 消息#${m.id} 消息内容: ${String(m.content).slice(0, 120)}`,
-        });
-        UI.toast('已收到举报，我们会尽快核实');
-      } catch (err) { UI.toast(err.message); }
+      // R2-N2: 举报前先选理由（Amy#3），不再硬编码"骚扰"
+      const reasons = ['骚扰', '欺诈', '言语辱骂', '人身安全', '其他'];
+      const rs = UI.sheet('举报这条消息', `
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          ${reasons.map((r) => `<button class="btn plain" data-r="${r}">${r}</button>`).join('')}
+        </div>`, { cancel: true });
+      rs.el.querySelectorAll('[data-r]').forEach((b) => {
+        b.onclick = async () => {
+          try {
+            await API.post(`/users/${other.id}/report`, {
+              reason: b.dataset.r,
+              detail: `会话#${currentConvId} 消息#${m.id} 消息内容: ${String(m.content).slice(0, 120)}`,
+            });
+            rs.close();
+            UI.toast('已收到举报，我们会尽快核实');
+          } catch (err) { UI.toast(err.message); }
+        };
+      });
     });
     menu.querySelector('[data-act="copy"]').addEventListener('click', async () => {
       closeBubbleMenu();
@@ -126,9 +137,9 @@ App.register('conv', async (el, seg) => {
   const chatPaneHTML = `
     <div class="navbar">
       <div class="navbar-inner">
-        <button class="navbar-btn" id="btn-back">${ic('back', 20) || '‹'}</button>
+        <button class="navbar-btn" id="btn-back" aria-label="返回">${ic('back', 20) || '‹'}</button>
         <div class="navbar-title" id="title" style="font-size:16px;">...</div>
-        <button class="navbar-btn" id="btn-more">${ic('more', 20) || '···'}</button>
+        <button class="navbar-btn" id="btn-more" aria-label="更多">${ic('more', 20) || '···'}</button>
       </div>
     </div>
     <div class="chat-scroll" id="msgs" style="flex:1; overflow-y:auto;"></div>
@@ -359,7 +370,7 @@ App.register('conv', async (el, seg) => {
     const s = UI.sheet('', `
       <button class="btn plain block" id="m-profile" style="margin-bottom:8px;">${UI.icon('user', 14)} 查看 TA 的主页</button>
       <button class="btn plain block" id="m-report" style="margin-bottom:8px;">${UI.icon('flag', 14)} 举报聊天记录</button>
-      <button class="btn danger block" id="m-block">${UI.icon('slash', 14)} 拉黑并退出会话</button>`);
+      <button class="btn danger block" id="m-block">${UI.icon('slash', 14)} 拉黑并退出会话</button>`, { cancel: true });
     s.el.querySelector('#m-profile').onclick = () => { s.close(); if (other) App.navigate('#/user/' + other.id); };
     s.el.querySelector('#m-report').onclick = () => { s.close(); openReport(); };
     s.el.querySelector('#m-block').onclick = async () => {
@@ -379,7 +390,7 @@ App.register('conv', async (el, seg) => {
     const s = UI.sheet('举报', `
       <div style="display:flex; flex-direction:column; gap:8px;">
         ${reasons.map((r) => `<button class="btn plain" data-r="${r}">${r}</button>`).join('')}
-      </div>`);
+      </div>`, { cancel: true });
     s.el.querySelectorAll('[data-r]').forEach((b) => {
       b.onclick = async () => {
         try {

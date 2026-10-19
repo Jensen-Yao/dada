@@ -4,7 +4,8 @@
   --primary: #FF7A45;
   --primary-deep: #F05A24;
   --primary-soft: #FFF1EA;
-  --grad-primary: linear-gradient(135deg, #FF7A45, #FF9A62);
+  /* U2：CTA 白字对比——原浅端 #FF9A62 上白字仅 2.09:1；两端加深为 #E8541F(白字3.67)→#F05A24(白字3.39)，双端 ≥3:1 */
+  --grad-primary: linear-gradient(135deg, #C93D0E, #D14514); /* R2-N1: 白字双端 5.05/4.59 ≥AA 4.5 */
   /* 互动色：点赞/收藏等互动动作专用（H5-01 红=互动，小红书红；不与品牌橙同框） */
   --like: #FF2442;
   --like-soft: #FFEEF0;
@@ -13,7 +14,8 @@
   --card: #FFFFFF;
   --text: #222426;
   --text-2: #6B7178;
-  --text-3: #A5ABB2;
+  /* U1：#A5ABB2 on #F6F7F9=2.16 不达标 → #6B7178（on bg=4.60 / on 白卡=4.93，WCAG AA 过线） */
+  --text-3: #6B7178;
   --line: #EDEFF2;
   /* --danger 仅用于删除/封禁/SOS 等破坏性场景，与互动红语义区分 */
   --danger: #F04438;
@@ -151,7 +153,8 @@ img { display: block; max-width: 100%; }
   font-size: 15px; box-shadow: var(--shadow-card); color: var(--text);
   border: 1.5px solid transparent; transition: border-color .15s;
 }
-.input:focus, .textarea:focus, .select:focus { border-color: var(--primary); }
+/* U2（1.4.11）：聚焦边框 #FF7A45 on 白 = 2.59 < 3:1 → #E8541F（3.67） */
+.input:focus, .textarea:focus, .select:focus { border-color: #E8541F; }
 .textarea { min-height: 90px; resize: none; }
 .select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='7'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23A5ABB2' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 14px center; }
 
@@ -183,7 +186,8 @@ img { display: block; max-width: 100%; }
 }
 .btn:active { transform: scale(0.97); }
 .btn:disabled { opacity: 0.5; }
-.btn.primary { background: linear-gradient(135deg, var(--primary), #FF9A62); color: #fff; box-shadow: 0 4px 14px rgba(255,122,69,0.35); }
+/* U2：主 CTA 走加深后的 --grad-primary（白字双端 ≥3:1），不再用旧浅橙渐变 */
+.btn.primary { background: var(--grad-primary); color: #fff; box-shadow: 0 4px 14px rgba(201,61,14,0.35); }
 /* H7：不可操作的主按钮（满员/停止招募/提交中）灰底去饱和，替代亮橙误导 */
 .btn.primary:disabled { background: linear-gradient(135deg, #CDD1D6, #DDE0E4); color: #79808A; box-shadow: none; filter: grayscale(.6); opacity: .9; }
 .btn.muted { background: var(--line); color: var(--text-2); box-shadow: none; filter: grayscale(.4); }
@@ -222,6 +226,8 @@ img { display: block; max-width: 100%; }
 @keyframes sheetUp { from { transform: translateY(40%); opacity: 0.6; } to { transform: none; opacity: 1; } }
 .sheet-grab { width: 40px; height: 4px; border-radius: 2px; background: var(--line); margin: 0 auto 14px; }
 .sheet-title { font-size: 17px; font-weight: 700; text-align: center; margin-bottom: 14px; }
+/* U4：提交型 sheet 底部统一"取消"出口（UI.sheet opts.cancel 自动追加） */
+.sheet-cancel { margin-top: 10px; }
 
 /* ================= 聊天 ================= */
 .chat-page { display: flex; flex-direction: column; }
@@ -257,6 +263,9 @@ img { display: block; max-width: 100%; }
 
 /* ================= 通知（EM-05：36px 圆形容器 + 线性图标，sos/warning 红色语义） ================= */
 .notif-item { display: flex; gap: 12px; padding: 13px 14px; background: var(--card); border-bottom: 0.5px solid var(--line); align-items: flex-start; }
+/* 用户批评R1[搭子王#2]：带 post_id 的通知可点击深链到帖子详情 */
+.notif-item.notif-link { cursor: pointer; }
+.notif-item.notif-link:active { background: var(--line); }
 .notif-icon { width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: var(--primary-soft); color: var(--primary-deep); }
 .notif-icon.danger { background: #FEECEC; color: var(--danger); }
 .notif-body { flex: 1; min-width: 0; }
@@ -482,3 +491,27 @@ img { display: block; max-width: 100%; }
 .da-cta { flex-shrink: 0; min-width: 108px; }
 /* 详情页内容防底栏遮挡 */
 .page.post-page { padding-bottom: calc(84px + var(--safe-bottom)); }
+
+/* ================= 大字模式（老王P0 · 设置页开关，localStorage dada_bigfont → html[data-bigfont]） =================
+ * 根字号 17px / 正文 16.5px；元信息小字号统一 +1.5px：
+ * 变量层：--fs-xs 11→12.5px（pin-meta/pin-flag/carousel-ind/me2-uid 等）、--fs-sm 12.5→14px（pin-name/pin-like 等）、
+ *        --fs-md 14→15.5px（pin-title/详情信息行）。
+ * 逐类覆盖（未走 token 的 10~11px）：.tab-label .msg-time .msg-read .da-act .da-credit .conv-time
+ *   .notif-text .pill .vbadge .me2-chip .me2-uid .copy .cell-sub .rel-note .pin-full-pill .badge .bubble */
+html[data-bigfont] { font-size: 17px; --fs-xs: 12.5px; --fs-sm: 14px; --fs-md: 15.5px; }
+html[data-bigfont] body { font-size: 16.5px; }
+html[data-bigfont] .tab .tab-label { font-size: 11.5px; }       /* 10px  TabBar 文字 */
+html[data-bigfont] .msg-time { font-size: 12px; }               /* 10.5px 聊天时间 */
+html[data-bigfont] .msg-read { font-size: 11.5px; }             /* 10px   已读回执 */
+html[data-bigfont] .da-act, html[data-bigfont] .da-credit { font-size: 11.5px; } /* 10px 详情操作栏 */
+html[data-bigfont] .conv-time { font-size: 12.5px; }            /* 11px   会话列表时间 */
+html[data-bigfont] .notif-text { font-size: 14.5px; }           /* 13px   通知正文 */
+html[data-bigfont] .pill { font-size: 12.5px; }                 /* 11px   各类状态 pill */
+html[data-bigfont] .vbadge { font-size: 11.5px; }               /* 10px   认证徽章 */
+html[data-bigfont] .me2-chip { font-size: 12px; }               /* 10.5px 我的页标签 */
+html[data-bigfont] .me2-uid .copy { font-size: 11.5px; }        /* 10px   搭搭号"复制" */
+html[data-bigfont] .cell .cell-sub { font-size: 13px; }         /* 11.5px 设置行副文案 */
+html[data-bigfont] .rel-note { font-size: 13px; }               /* 11.5px 三选一说明 */
+html[data-bigfont] .pin-full-pill { font-size: 11.5px; }        /* 10px   卡片"已满员" */
+html[data-bigfont] .badge { font-size: 11.5px; }                /* 10px   未读角标 */
+html[data-bigfont] .bubble { font-size: 16.5px; }               /* 15px   聊天气泡正文 */

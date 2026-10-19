@@ -23,6 +23,8 @@ App.register('me', async (el) => {
   el.innerHTML = `
   <div class="me2-hero">
     <div class="me2-toprow">
+      <!-- 用户批评R1[小林#2]：角标亮在"我的"tab 但页内无通知入口 → 头部补铃铛，一步直达通知页 -->
+      <button class="me2-bell" id="btn-me-notif" aria-label="${me.unread_notif > 0 ? `通知，${me.unread_notif} 条未读` : '通知'}">${ic('bell', 20)}${me.unread_notif > 0 ? '<i class="me2-bell-dot"></i>' : ''}</button>
       <button class="me2-edit" id="btn-edit">编辑资料 ${ic('more', 14)}</button>
     </div>
     <div class="me2-user">
@@ -77,6 +79,7 @@ App.register('me', async (el) => {
 
   <div style="text-align:center; color:var(--text-3); font-size:11.5px; padding-bottom:8px;">搭搭 v2.0 · 轻社交 · 不婚恋 · 有边界</div>`;
 
+  el.querySelector('#btn-me-notif').onclick = () => App.navigate('#/notifications');
   el.querySelector('#btn-edit').onclick = () => App.navigate('#/edit-profile');
   el.querySelector('#btn-verify').onclick = openVerify;
   el.querySelector('#c-myposts').onclick = () => App.navigate('#/myposts');
@@ -96,7 +99,7 @@ App.register('me', async (el) => {
     const metaBits = [p.city, p.meet_time].filter(Boolean).map(esc).join(' · ');
     const likes = p.likes_count || 0;
     return `
-    <div class="me2-cell" data-id="${p.id}">
+    <div class="me2-cell" data-id="${p.id}" role="link" tabindex="0" aria-label="${esc(p.title)}" onkeydown="if(event.key==='Enter')App.navigate('#/post/${p.id}')">
       <div class="me2-cover">
         <img loading="lazy" src="${esc(coverOf(p))}" alt="" onerror="${UI.imgFallback(p.category)}">
         <span class="me2-cover-pill ${cls}">${st}</span>
@@ -166,7 +169,7 @@ App.register('me', async (el) => {
         <span style="display:flex;">${ic('graduation-cap', 22)}</span>
         <span style="text-align:left;"><b>学生认证</b> <span class="pill green">+30 搭力值</span><br><span style="font-size:12px;color:var(--text-3)">填写学校名称（正式版验证学籍）</span></span>
         ${me.verify_student ? '<span class="pill green">已通过</span>' : ''}
-      </button>`);
+      </button>`, { cancel: true });
     s.el.querySelector('#v-real').onclick = async () => {
       if (me.verify_real) return UI.toast('已通过真人认证');
       try {
@@ -179,8 +182,8 @@ App.register('me', async (el) => {
     s.el.querySelector('#v-stu').onclick = async () => {
       if (me.verify_student) return UI.toast('已通过学生认证');
       const s2 = UI.sheet('学生认证', `
-        <input id="f-school" class="input" placeholder="学校名称，如：北京大学">
-        <button class="btn primary block" id="btn-go" style="margin-top:10px;">提交认证</button>`);
+        <input id="f-school" class="input" aria-label="学校名称" placeholder="学校名称，如：北京大学">
+        <button class="btn primary block" id="btn-go" style="margin-top:10px;">提交认证</button>`, { cancel: true });
       s2.el.querySelector('#btn-go').onclick = async () => {
         const school = s2.el.querySelector('#f-school').value.trim();
         if (!school) return UI.toast('请填写学校名称');

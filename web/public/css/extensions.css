@@ -9,7 +9,8 @@
 :root {
   --like: #FF2442;
   --like-soft: #FFEEF0;
-  --grad-primary: linear-gradient(135deg, #FF7A45, #FF9A62);
+  /* U2：与 app.css 同步加深（白字双端 ≥3:1；此处后加载会覆盖 app.css 的同名 token） */
+  --grad-primary: linear-gradient(135deg, #C93D0E, #D14514); /* R2-N1 同步：与app.css一致，白字≥4.5 */
   --radius-sm: 10px;
   --radius-md: 14px;
   --radius-xl: 24px;
@@ -77,6 +78,21 @@
   backdrop-filter: blur(6px);
 }
 .me2-edit:active { background: rgba(255, 255, 255, 0.34); }
+/* 用户批评R1[小林#2]：我的页头部通知铃铛入口（角标亮时有出口），样式与"编辑资料"同系 */
+.me2-bell {
+  position: relative;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 28px; color: #fff;
+  background: rgba(255, 255, 255, 0.22);
+  border-radius: 99px;
+  backdrop-filter: blur(6px);
+}
+.me2-bell:active { background: rgba(255, 255, 255, 0.34); }
+.me2-bell-dot {
+  position: absolute; top: 3px; right: 3px;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--danger); border: 1.5px solid rgba(255, 122, 69, 0.9);
+}
 .me2-user {
   position: relative;
   z-index: 1;

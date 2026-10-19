@@ -47,9 +47,9 @@ App.register('post', async (el, seg) => {
     el.innerHTML = `
     <div class="navbar">
       <div class="navbar-inner">
-        <button class="navbar-btn" onclick="history.back()">${UI.icon('chevron-left', 22)}</button>
+        <button class="navbar-btn" onclick="history.back()" aria-label="返回">${UI.icon('chevron-left', 22)}</button>
         <div class="navbar-title">${UI.esc(p.category_name)}搭局</div>
-        <button class="navbar-btn" id="btn-share">${UI.icon('share', 19)}</button>
+        <button class="navbar-btn" id="btn-share" aria-label="分享">${UI.icon('share', 19)}</button>
       </div>
     </div>
 
@@ -94,7 +94,7 @@ App.register('post', async (el, seg) => {
 
     <!-- H5-11：底部固定操作栏（作者｜点赞｜评论｜主按钮） -->
     <div class="detail-actionbar detail-bar">
-      <div class="da-author" id="author-card">
+      <div class="da-author" id="author-card" role="link" tabindex="0" aria-label="${UI.esc(p.author.nickname)}的主页" onkeydown="if(event.key==='Enter')App.navigate('#/user/${p.author.id})">
         ${UI.avatarHTML(p.author)}
         <div class="da-author-info">
           <span class="da-name">${UI.esc(p.author.nickname)} ${UI.genderBadge(p.author.gender)}${p.author.verify_real ? '<span class="vbadge real">真人</span>' : ''}${blocked ? '<span class="pill gray">已拉黑</span>' : ''}</span>
@@ -230,12 +230,12 @@ App.register('post', async (el, seg) => {
       return;
     }
     const s = UI.sheet('申请加入「' + UI.esc(p.title.slice(0, 20)) + '」', `
-      <textarea id="f-msg" class="textarea" placeholder="和组局者打个招呼吧：为什么想加入、你能满足什么要求…（选填）"></textarea>
+      <textarea id="f-msg" class="textarea" aria-label="申请留言（选填）" placeholder="和组局者打个招呼吧：为什么想加入、你能满足什么要求…（选填）"></textarea>
       <div class="tpl-chips">
         <span class="tpl-chip" data-tpl="我时间地点都OK，可以先聊聊">我时间地点都OK，可以先聊聊</span>
         <span class="tpl-chip" data-tpl="同好！我常玩这个，期待组局">同好！我常玩这个，期待组局</span>
       </div>
-      <button class="btn primary block" id="btn-go" style="margin-top:12px;">提交申请</button>`);
+      <button class="btn primary block" id="btn-go" style="margin-top:12px;">提交申请</button>`, { cancel: true });
     // VD-05 FE-2：申请留言模板 chip，点击填入 textarea（不直接提交）
     s.el.querySelectorAll('[data-tpl]').forEach((chip) => {
       chip.onclick = () => { s.el.querySelector('#f-msg').value = chip.dataset.tpl; };
@@ -367,7 +367,7 @@ App.register('post', async (el, seg) => {
         <button class="rel-btn" id="rel-save">存为搭友</button>
         <button class="rel-btn" id="rel-end">到此为止</button>
       </div>
-      <div class="rel-note">互评后已是搭友，可在「我的 - 搭友列表」找到</div>
+      <div class="rel-note">双方完成互评后自动成为搭友，可在「我的 - 搭友列表」找到</div>
     </div>`;
   }
 
@@ -380,7 +380,7 @@ App.register('post', async (el, seg) => {
     };
     box.querySelector('#rel-save').onclick = () => {
       API.post(`/posts/${pid}/relationship`, { choice: 'save' }).catch(() => {});
-      UI.toast('互评后已是搭友，可在「我的 - 搭友列表」找到');
+      UI.toast('双方完成互评后自动成为搭友，可在「我的 - 搭友列表」找到');
       App.navigate('#/partners');
     };
     box.querySelector('#rel-end').onclick = () => {
@@ -433,8 +433,8 @@ App.register('post', async (el, seg) => {
       <div style="display:flex; justify-content:center; gap:8px; padding:8px 0; color:var(--warning);" id="star-pick"></div>
       <div style="text-align:center; font-size:13px; color:var(--text-3); margin-bottom:12px;" id="star-text">非常满意，还想再约！</div>
       <div id="tag-pick">${meta.rate_tags.map((t) => `<span class="tag" data-tag="${t}">${t}</span>`).join('')}</div>
-      <textarea id="f-rc" class="textarea" placeholder="写点什么（选填）" style="margin-top:10px;"></textarea>
-      <button class="btn primary block" id="btn-go" style="margin-top:12px;">提交评价</button>`);
+      <textarea id="f-rc" class="textarea" aria-label="评价内容（选填）" placeholder="写点什么（选填）" style="margin-top:10px;"></textarea>
+      <button class="btn primary block" id="btn-go" style="margin-top:12px;">提交评价</button>`, { cancel: true });
 
     const starTexts = ['', '很糟糕', '不太好', '一般般', '满意', '非常满意，还想再约！'];
     const starPick = s.el.querySelector('#star-pick');

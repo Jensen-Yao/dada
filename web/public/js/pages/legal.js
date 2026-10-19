@@ -33,7 +33,7 @@
   const doc = (title, desc, secs, cross) => `
     <div class="navbar">
       <div class="navbar-inner">
-        <button class="navbar-btn" onclick="history.back()">‹</button>
+        <button class="navbar-btn" onclick="history.back()" aria-label="返回">‹</button>
         <div class="navbar-title">${title}</div>
         <div style="width:34px;"></div>
       </div>
@@ -170,7 +170,7 @@
       el.innerHTML = `
       <div class="navbar">
         <div class="navbar-inner">
-          <button class="navbar-btn" onclick="history.back()">‹</button>
+          <button class="navbar-btn" onclick="history.back()" aria-label="返回">‹</button>
           <div class="navbar-title">页面不存在</div>
           <div style="width:34px;"></div>
         </div>

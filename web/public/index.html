@@ -2,7 +2,10 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <!-- U7：放开缩放（原 user-scalable=no 违反 WCAG 1.4.4）；Capacitor 壳内 WebView 可另行禁缩放，互不影响 -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover">
+  <!-- 老王P0：大字模式（设置页开关写 localStorage dada_bigfont），首帧前挂 html[data-bigfont] 避免闪变 -->
+  <script>try{if(localStorage.getItem('dada_bigfont')==='1')document.documentElement.dataset.bigfont='1';}catch(e){}</script>
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="搭搭">

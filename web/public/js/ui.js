@@ -27,35 +27,76 @@ const UI = (() => {
   }
 
   // ---------- 底部弹层 ----------
+  // U4：① dialog 语义（role/aria-modal/aria-label）；② Esc 关闭（locked 除外，多层叠加只关最顶层）；
+  // ③ 打开即聚焦 sheet 内第一个可聚焦元素（没有则聚焦 sheet 本身），关闭时焦点归还触发元素；
+  // ④ opts.cancel=true 时底部自动补"取消"plain 按钮（提交型 sheet 的统一取消出口）。
+  const sheetStack = [];
   function sheet(title, contentHTML, opts = {}) {
     const mask = document.createElement('div');
     mask.className = 'modal-mask';
+    mask.setAttribute('role', 'dialog');
+    mask.setAttribute('aria-modal', 'true');
+    if (title) mask.setAttribute('aria-label', title);
     mask.innerHTML = `
-      <div class="modal-sheet">
+      <div class="modal-sheet" tabindex="-1">
         <div class="sheet-grab"></div>
         ${title ? `<div class="sheet-title">${title}</div>` : ''}
         <div class="sheet-body">${contentHTML}</div>
       </div>`;
-    const close = () => { mask.style.opacity = '0'; mask.style.transition = 'opacity .15s'; setTimeout(() => mask.remove(), 160); };
+    let closed = false;
+    const prevFocus = document.activeElement;
+    const api = { el: mask, close: null };
+    const close = () => {
+      if (closed) return;
+      closed = true;
+      const i = sheetStack.indexOf(api);
+      if (i > -1) sheetStack.splice(i, 1);
+      if (!opts.locked) document.removeEventListener('keydown', onKey);
+      mask.style.opacity = '0'; mask.style.transition = 'opacity .15s';
+      setTimeout(() => {
+        mask.remove();
+        if (prevFocus && prevFocus.isConnected) { try { prevFocus.focus(); } catch { /* ignore */ } }
+        if (typeof opts.onClosed === 'function') opts.onClosed();
+      }, 160);
+    };
+    api.close = close;
+    function onKey(e) {
+      if (e.key === 'Escape' && sheetStack[sheetStack.length - 1] === api) close();
+    }
     if (!opts.locked) {
       mask.addEventListener('click', (e) => { if (e.target === mask) close(); });
+      document.addEventListener('keydown', onKey);
+    }
+    if (opts.cancel) {
+      const bar = document.createElement('div');
+      bar.className = 'sheet-cancel';
+      bar.innerHTML = '<button class="btn plain block" data-sheet-cancel>取消</button>';
+      mask.querySelector('.sheet-body').appendChild(bar);
+      bar.querySelector('[data-sheet-cancel]').onclick = () => close();
     }
     document.body.appendChild(mask);
-    return { el: mask, close };
+    sheetStack.push(api);
+    // 打开即移焦：sheet 内第一个可聚焦元素；没有则聚焦 sheet 容器本身（tabindex=-1）
+    const first = mask.querySelector('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+    (first || mask.querySelector('.modal-sheet')).focus();
+    return api;
   }
 
   // ---------- 确认框 ----------
+  // U4：Esc / 遮罩点击关闭视为"取消"（onClosed 兜底），Promise 不再悬挂
   function confirm(msg, { okText = '确定', cancelText = '取消', danger = false } = {}) {
     return new Promise((resolve) => {
+      let settled = false;
+      const done = (v) => { if (!settled) { settled = true; resolve(v); } };
       const s = sheet('', `
         <div style="text-align:center; padding: 6px 10px 4px; font-size:15.5px; line-height:1.6;">${msg}</div>
         <div style="display:flex; gap:10px; margin-top:18px;">
           <button class="btn plain block" data-act="no" style="flex:1">${cancelText}</button>
           <button class="btn block ${danger ? 'danger' : 'primary'}" data-act="yes" style="flex:1">${okText}</button>
-        </div>`);
+        </div>`, { onClosed: () => done(false) });
       s.el.addEventListener('click', (e) => {
         const act = e.target?.dataset?.act;
-        if (act) { s.close(); resolve(act === 'yes'); }
+        if (act) { done(act === 'yes'); s.close(); }
       });
     });
   }
@@ -294,7 +335,7 @@ const UI = (() => {
     }
 
     return `
-    <div class="wf-item"><div class="pin-card${p.status === 'full' ? ' is-full' : ''}" data-id="${p.id}">
+    <div class="wf-item"><div class="pin-card${p.status === 'full' ? ' is-full' : ''}" data-id="${p.id}" role="link" tabindex="0" aria-label="${esc(p.title)}" onkeydown="if(event.key==='Enter')App.navigate('#/post/${p.id}')">
       <div class="pin-cover" style="--ar:${ar}">
         ${hasImg ? `<img src="${esc(coverOf(p))}" loading="lazy" alt="" onerror="${imgFallback(p.category)}">` : `<div class="pin-emoji">${catIcon(p.category, 28)}</div>`}
         ${flags.join('')}

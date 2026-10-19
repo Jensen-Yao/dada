@@ -17,9 +17,9 @@ App.register('user', async (el, seg) => {
     el.innerHTML = `
     <div class="navbar">
       <div class="navbar-inner">
-        <button class="navbar-btn" onclick="history.back()">‹</button>
+        <button class="navbar-btn" onclick="history.back()" aria-label="返回">‹</button>
         <div class="navbar-title">TA 的主页</div>
-        <button class="navbar-btn" id="btn-more">···</button>
+        <button class="navbar-btn" id="btn-more" aria-label="更多">···</button>
       </div>
     </div>
 
@@ -99,7 +99,7 @@ App.register('user', async (el, seg) => {
       const s = UI.sheet('举报 ' + UI.esc(u.nickname), `
       <div style="display:flex; flex-direction:column; gap:8px;">
         ${reasons.map((r) => `<button class="btn plain" data-r="${r}">${r}</button>`).join('')}
-      </div>`);
+      </div>`, { cancel: true });
       s.el.querySelectorAll('[data-r]').forEach((b) => {
         b.onclick = async () => {
           try {

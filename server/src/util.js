@@ -1,7 +1,28 @@
 import jwt from 'jsonwebtoken';
+import path from 'node:path';
+import fs from 'node:fs';
+import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { db, now } from './db.js';
 
-const JWT_SECRET = process.env.DADA_JWT_SECRET || 'dada-dev-secret-change-me';
+// ---------- JWT 签名密钥（S1/A1 修复） ----------
+// 此前回落到代码内置默认值 'dada-dev-secret-change-me'（公开仓库即知）→ 可离线伪造任意用户/管理员 token。
+// 现在的优先级：DADA_JWT_SECRET 环境变量 → server/data/.jwt-secret 持久化文件（无则生成 32 字节随机 hex，权限 600）。
+// 不再存在任何"代码内置默认密钥"路径；部署示例见 docker-compose.yml（${DADA_JWT_SECRET:?}）与 deploy/systemd-example.service。
+function loadJwtSecret() {
+  if (process.env.DADA_JWT_SECRET) return process.env.DADA_JWT_SECRET;
+  const file = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'data', '.jwt-secret');
+  try {
+    const s = fs.readFileSync(file, 'utf8').trim();
+    if (s) return s;
+  } catch { /* 文件不存在 → 生成新密钥 */ }
+  const secret = crypto.randomBytes(32).toString('hex'); // 64 hex = 32 字节熵
+  fs.writeFileSync(file, secret, { mode: 0o600 });
+  try { fs.chmodSync(file, 0o600); } catch { /* 个别文件系统不支持显式 chmod */ }
+  console.warn('[dada] 已生成持久化密钥，生产环境请设置DADA_JWT_SECRET环境变量（server/data/.jwt-secret 仅用于本地/演示）');
+  return secret;
+}
+const JWT_SECRET = loadJwtSecret();
 const TOKEN_TTL = '30d';
 
 export function signToken(user) {

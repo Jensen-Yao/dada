@@ -12,12 +12,33 @@ const smsCodes = new Map(); // phone -> { code, expires, sentAt }
 const SMS_TTL = 5 * 60 * 1000;      // 验证码 5 分钟有效
 const SMS_RESEND_INTERVAL = 60 * 1000; // 60 秒内禁止重发
 
+// S4/A9 修复：/sms/send 每IP每小时限流（内存级滑动窗口）。
+// 此前仅按手机号 60s 一条限频——换号即可无限轰炸短信通道并撑爆 smsCodes Map。
+const SMS_IP_LIMIT = 10;              // 每 IP 每小时最多 10 条
+const SMS_IP_WINDOW = 3600 * 1000;
+const smsIpLog = new Map(); // ip -> [发送时间戳]
+
+// S8/A4 缓解：登录接口每IP限频（内存级），超限 429——防在线爆破弱口令 & bcrypt 同步阻塞被并发打满。
+const LOGIN_IP_LIMIT = 20;            // 每 IP 15 分钟最多 20 次
+const LOGIN_IP_WINDOW = 15 * 60 * 1000;
+const loginIpLog = new Map(); // ip -> [尝试时间戳]
+
+function clientIp(req) {
+  return req.ip || req.socket?.remoteAddress || 'unknown';
+}
+
 const PHONE_RE = /^1[3-9]\d{9}$/;
 
 authRouter.post('/sms/send', (req, res) => {
   const { phone } = req.body || {};
   if (!PHONE_RE.test(String(phone || ''))) {
     return res.status(400).json({ error: '手机号格式不正确' });
+  }
+  // 每 IP 滑动窗口限流（S4）：换手机号也绕不过
+  const t0 = Date.now();
+  const ipLog = (smsIpLog.get(clientIp(req)) || []).filter((ts) => t0 - ts < SMS_IP_WINDOW);
+  if (ipLog.length >= SMS_IP_LIMIT) {
+    return res.status(429).json({ error: '发送过于频繁，请稍后再试' });
   }
   // 已注册判断排除已注销账号（注销后手机号可释放复用）
   if (db.prepare("SELECT 1 FROM users WHERE phone = ? AND status != 'deleted'").get(phone)) {
@@ -28,16 +49,26 @@ authRouter.post('/sms/send', (req, res) => {
   if (prev && t - prev.sentAt < SMS_RESEND_INTERVAL) {
     return res.status(429).json({ error: '发送过于频繁，请 60 秒后再试' });
   }
+  // 顺手清理过期验证码条目（A9：Map 只增不减 → 内存无上限）
+  for (const [k, v] of smsCodes) {
+    if (Date.now() > v.expires) smsCodes.delete(k);
+  }
   const code = String(Math.floor(100000 + Math.random() * 900000));
   smsCodes.set(phone, { code, expires: t + SMS_TTL, sentAt: t });
+  ipLog.push(t);
+  smsIpLog.set(clientIp(req), ipLog);
   // 演示环境：直接返回验证码，方便联调与审核演示（真实现接短信 SDK 后移除）
   res.json(ok({ sent: true, demo_code: code }));
 });
 
 function verifySmsCode(phone, code) {
   const rec = smsCodes.get(phone);
-  if (!rec || Date.now() > rec.expires || rec.code !== String(code || '')) return false;
-  return true;
+  if (!rec) return false;
+  if (Date.now() > rec.expires) {
+    smsCodes.delete(phone); // 过期即清（A9：不再驻留内存）
+    return false;
+  }
+  return rec.code === String(code || '');
 }
 
 // 手机号可读性：自动生成用户名 dadu_<手机号后8位>，冲突时追加随机后缀
@@ -79,13 +110,17 @@ authRouter.post('/register', (req, res) => {
     if (nick.length < 1 || nick.length > 20) {
       return res.status(400).json({ error: '昵称需为 1-20 个字符' });
     }
+    // 用户批评R1（Amy#1/老王#2，P0）：注册表单收集的 gender/city 此前被硬编码丢弃
+    // （gender='secret', city=''）→ 女性用户永远进不了女生局、发布页城市永不预填。现入库。
+    const gender = ['male', 'female', 'secret'].includes(body.gender) ? body.gender : 'secret';
+    const city = String(body.city || '').trim().slice(0, 60); // 与用户名注册模式/PUT /me 的 60 上限对齐
     const username = genUsernameByPhone(phone);
     const hash = bcrypt.hashSync(String(password), 10);
     const t = now();
     const info = db.prepare(`
       INSERT INTO users (username, password_hash, nickname, gender, birth_year, city, tags, phone, adult_confirmed, created_at, last_active_at)
-      VALUES (?,?,?,'secret',NULL,'','[]',?,1,?,?)
-    `).run(username, hash, nick, phone, t, t);
+      VALUES (?,?,?,?,NULL,?,'[]',?,1,?,?)
+    `).run(username, hash, nick, gender, city, phone, t, t);
     smsCodes.delete(phone); // 验证码一次性使用
     const user = findUser(info.lastInsertRowid);
     trackEvent(user.id, 'register'); // VD-01 漏斗：注册
@@ -119,6 +154,15 @@ authRouter.post('/register', (req, res) => {
 });
 
 authRouter.post('/login', (req, res) => {
+  // 每 IP 限频（S8）：在 bcrypt.compareSync 之前拦截，超限直接 429，不再消耗同步 CPU（A4）
+  const ip = clientIp(req);
+  const t0 = Date.now();
+  const log = (loginIpLog.get(ip) || []).filter((ts) => t0 - ts < LOGIN_IP_WINDOW);
+  if (log.length >= LOGIN_IP_LIMIT) {
+    return res.status(429).json({ error: '尝试过于频繁，请稍后再试' });
+  }
+  log.push(t0);
+  loginIpLog.set(ip, log);
   const { username, phone, password } = req.body || {};
   const isPhone = phone !== undefined && phone !== null && phone !== '';
   const user = isPhone

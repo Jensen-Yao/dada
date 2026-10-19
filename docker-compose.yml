@@ -28,8 +28,10 @@ services:
     environment:
       - DADA_PORT=3000
       - DADA_DB=/data/dada.sqlite
-      # 生产环境必须换成足够长的随机串（影响登录态 JWT 签名）：openssl rand -hex 32
-      - DADA_JWT_SECRET=please-change-me-to-a-long-random-string
+      # JWT 签名密钥必须注入强随机串（生成：openssl rand -hex 32）。
+      # ${VAR:?err} 语法：未设置 DADA_JWT_SECRET 时 compose 直接拒绝启动，杜绝回落到公开占位串（S1/A1）。
+      # 不设置时应用虽会自动生成文件密钥（/data/.jwt-secret），但显式注入便于密钥轮换与备份。
+      - DADA_JWT_SECRET=${DADA_JWT_SECRET:?请设置 DADA_JWT_SECRET（openssl rand -hex 32 生成强随机串）}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:3000/api/meta"]

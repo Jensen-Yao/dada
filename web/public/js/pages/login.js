@@ -20,32 +20,32 @@ App.register('login', async (el) => {
     <div class="login-form2">
       ${mode === 'login' ? `
       <div class="form-item">
-        <input id="f-user" placeholder="手机号 / 用户名" class="input" autocomplete="username">
+        <input id="f-user" aria-label="手机号或用户名" placeholder="手机号 / 用户名" class="input" autocomplete="username">
       </div>` : `
       <div class="form-item">
         <div class="input login-phone">
           <span class="phone-prefix">+86</span>
-          <input id="f-phone" type="tel" inputmode="numeric" maxlength="11" placeholder="请输入手机号" autocomplete="tel-national">
+          <input id="f-phone" type="tel" inputmode="numeric" maxlength="11" aria-label="手机号" placeholder="请输入手机号" autocomplete="tel-national">
         </div>
       </div>
       <div class="form-item">
         <div class="input sms-field">
-          <input id="f-code" type="tel" inputmode="numeric" maxlength="6" placeholder="短信验证码">
+          <input id="f-code" type="tel" inputmode="numeric" maxlength="6" aria-label="短信验证码" placeholder="短信验证码">
           <button id="btn-sms" class="sms-btn" type="button">获取验证码</button>
         </div>
       </div>`}
       <div class="form-item">
-        <input id="f-pass" type="password" placeholder="密码（至少6位）" class="input" autocomplete="${mode === 'login' ? 'current-password' : 'new-password'}">
+        <input id="f-pass" type="password" aria-label="密码" placeholder="密码（至少6位）" class="input" autocomplete="${mode === 'login' ? 'current-password' : 'new-password'}">
       </div>
       <div class="form-item ${mode === 'login' ? 'hidden' : ''}" id="row-extra">
-        <input id="f-nick" placeholder="昵称" class="input">
+        <input id="f-nick" aria-label="昵称" placeholder="昵称" class="input">
         <div style="display:flex; gap:10px; margin-top:10px;">
-          <select id="f-gender" class="select" style="flex:1;">
+          <select id="f-gender" aria-label="性别" class="select" style="flex:1;">
             <option value="secret">性别：保密</option>
             <option value="female">女生</option>
             <option value="male">男生</option>
           </select>
-          <input id="f-city" placeholder="城市，如 北京" class="input" style="flex:1;">
+          <input id="f-city" aria-label="城市" placeholder="城市，如 北京" class="input" style="flex:1;">
         </div>
       </div>
       ${mode === 'register' ? `
@@ -75,6 +75,27 @@ App.register('login', async (el) => {
   el.innerHTML = html();
 
   const $ = (id) => el.querySelector('#' + id);
+
+  // R2-N5: 表单草稿——点协议链接跳走后返回时恢复已输入内容（sessionStorage，关标签页即弃）
+  const DRAFT_KEY = 'dada_login_draft';
+  try {
+    const draft = JSON.parse(sessionStorage.getItem(DRAFT_KEY) || '{}');
+    if (draft.mode === mode) {
+      for (const id of ['f-user', 'f-pass', 'f-nick', 'f-phone']) {
+        if (draft[id]) $(id) && ($(id).value = draft[id]);
+      }
+    }
+  } catch { /* ignore */ }
+  const saveDraft = () => {
+    const d = { mode };
+    for (const id of ['f-user', 'f-pass', 'f-nick', 'f-phone']) {
+      const node = $(id);
+      if (node && node.value) d[id] = node.value;
+    }
+    try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify(d)); } catch { /* ignore */ }
+  };
+  el.addEventListener('input', saveDraft);
+  App.onCleanup(() => { saveDraft(); });
 
   $('btn-switch').onclick = () => {
     mode = mode === 'login' ? 'register' : 'login';

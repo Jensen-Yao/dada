@@ -61,6 +61,11 @@ if (fs.existsSync(path.join(WEB_DIR, 'index.html'))) {
 }
 
 app.use((err, _req, res, _next) => {
+  // multer 上传错误（S11/A12）：类型不符/超限是用户输入问题，映射为 400 而非 500（避免污染错误监控）
+  if (err && (err.name === 'MulterError' || err.code === 'LIMIT_FILE_SIZE' || err.code === 'LIMIT_FILE_COUNT' || err.code === 'LIMIT_UNEXPECTED_FILE')) {
+    const msg = err.code === 'LIMIT_FILE_SIZE' ? '文件过大' : err.code === 'LIMIT_FILE_COUNT' || err.code === 'LIMIT_UNEXPECTED_FILE' ? '文件数量超限' : err.message;
+    return res.status(400).json({ error: `上传失败：${msg}` });
+  }
   console.error('[dada] error:', err.message);
   res.status(err.status || 500).json({ error: err.status ? err.message : '服务器开小差了，请稍后再试' });
 });
@@ -68,6 +73,17 @@ app.use((err, _req, res, _next) => {
 // ---------- WebSocket：实时聊天 ----------
 const wss = new WebSocketServer({ server, path: '/ws' });
 const onlineSockets = new Map(); // userId -> Set<ws>
+// WS 加固（S5/S6/A2/A5）：连接上限 / 单用户上限 / 每连接 chat 帧限流
+const WS_MAX_CLIENTS = 2000;   // 总连接上限（防 fd/内存无成本耗尽）
+const WS_MAX_PER_USER = 5;     // 单用户并发连接上限（防单账号多连接放大）
+const WS_CHAT_PER_SEC = 5;     // 每连接每秒最多 5 帧 chat（防单连接灌库/刷爆对端通知）
+
+function removeSocket(uid, ws) {
+  const set = onlineSockets.get(uid);
+  if (!set) return;
+  set.delete(ws);
+  if (!set.size) onlineSockets.delete(uid);
+}
 
 function sendToUser(userId, payload) {
   const set = onlineSockets.get(userId);
@@ -84,25 +100,56 @@ export function notifyWS(userId, type, payload) {
 }
 
 wss.on('connection', (ws, req) => {
+  // 总连接上限（A5）：超过即关闭新连（4003=服务端策略拒绝）
+  if (wss.clients.size > WS_MAX_CLIENTS) {
+    ws.close(4003, '连接数已达上限');
+    return;
+  }
   let user = null;
+  ws.isAlive = true;      // 服务端心跳探活标记（A5）
+  ws.missedPings = 0;
+  ws.chatTimes = [];      // chat 帧限流滑动窗口（S5）
+  ws.on('pong', () => { ws.isAlive = true; });
   ws.on('message', (raw) => {
     let msg;
     try { msg = JSON.parse(raw.toString()); } catch { return; }
     if (msg.type === 'auth') {
+      // 重复 auth（S6）：切换身份前先从旧身份集合移除本 socket——
+      // 否则 sendToUser(旧uid) 会继续向"已换身份"的连接推送旧用户的全量实时消息（静默窃听）。
+      if (user) removeSocket(user.id, ws);
       req.headers.authorization = `Bearer ${msg.token}`;
       user = getAuthUser(req);
       if (user) {
+        // 单用户连接上限（A5）：超出拒绝本条 auth（4001 契约=客户端不自动重连）
+        const set = onlineSockets.get(user.id);
+        if (set && set.size >= WS_MAX_PER_USER) {
+          ws.send(JSON.stringify({ type: 'auth_fail', error: '连接数过多' }));
+          ws.close(4001, '连接数过多');
+          user = null;
+          return;
+        }
         if (!onlineSockets.has(user.id)) onlineSockets.set(user.id, new Set());
         onlineSockets.get(user.id).add(ws);
         db.prepare('UPDATE users SET last_active_at = ? WHERE id = ?').run(now(), user.id);
         ws.send(JSON.stringify({ type: 'auth_ok', user_id: user.id }));
       } else {
+        // 认证失败即断开（A2）：此前只回 auth_fail 不关连接，后续消息被静默丢弃（用户消息蒸发）。
+        // close code 4001 契约：前端收到 4001 不自动重连（token 已失效，需重新登录）。
         ws.send(JSON.stringify({ type: 'auth_fail' }));
+        ws.close(4001, '认证失败');
       }
       return;
     }
     if (!user) return;
     if (msg.type === 'chat') {
+      // 每秒 chat 帧限流（S5）：超 5 帧/秒直接断开（4003），防止单连接无限灌库/刷爆对端
+      const t = Date.now();
+      ws.chatTimes = ws.chatTimes.filter((ts) => t - ts < 1000);
+      if (ws.chatTimes.length >= WS_CHAT_PER_SEC) {
+        ws.close(4003, '发送过快');
+        return;
+      }
+      ws.chatTimes.push(t);
       const result = handleChatMessage(user, parseInt(msg.conv_id), msg.content);
       if (result.error) {
         ws.send(JSON.stringify({ type: 'chat_error', error: result.error }));
@@ -126,17 +173,27 @@ wss.on('connection', (ws, req) => {
     }
   });
   ws.on('close', () => {
-    if (user && onlineSockets.has(user.id)) {
-      onlineSockets.get(user.id).delete(ws);
-      if (!onlineSockets.get(user.id).size) onlineSockets.delete(user.id);
-    }
+    // 重复 auth 已在切换时清理旧身份集合，这里只需移除当前身份
+    if (user) removeSocket(user.id, ws);
   });
 });
 
-// 心跳清理死连接
+// 服务端主动心跳（A5 改造）：每 30s 对所有连接发协议级 ping，连续 2 次未收到 pong 判定半开/死连接并
+// terminate()。此前只清理 readyState===3（本就触发 close 事件），对 NAT 超时/进程消失的"幽灵在线"零探测。
 setInterval(() => {
-  for (const set of onlineSockets.values()) {
-    for (const ws of set) if (ws.readyState === 3) set.delete(ws);
+  for (const ws of wss.clients) {
+    if (ws.readyState !== 1) continue;
+    if (!ws.isAlive) {
+      ws.missedPings++;
+      if (ws.missedPings >= 2) {
+        ws.terminate();
+        continue;
+      }
+    } else {
+      ws.missedPings = 0;
+    }
+    ws.isAlive = false;
+    try { ws.ping(); } catch { /* 连接已断 */ }
   }
 }, 30000).unref();
 

@@ -107,6 +107,10 @@ chatRouter.get('/conv/:id/messages', requireAuth, (req, res) => {
 
 // WebSocket 使用的核心发送逻辑（含敏感词与首条消息安全提示）
 export function handleChatMessage(fromUser, convId, rawContent) {
+  // 账号状态复查（S3/A7）：user 对象在 WS auth 时快照，此后注销/封禁不会刷新——
+  // 残留"活幽灵"连接可继续发消息。每条 chat 帧前点查一次 users.status（与 HTTP 侧 getAuthUser 对齐）。
+  const me = db.prepare('SELECT id, status FROM users WHERE id = ?').get(fromUser.id);
+  if (!me || me.status !== 'active') return { error: '账号状态异常' };
   const c = db.prepare('SELECT * FROM conversations WHERE id = ?').get(convId);
   if (!c) return { error: '会话不存在' };
   if (c.user_a !== fromUser.id && c.user_b !== fromUser.id) return { error: '无权在该会话发送消息' };

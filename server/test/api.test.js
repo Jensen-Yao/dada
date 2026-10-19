@@ -17,6 +17,11 @@ fs.rmSync(DB_PATH + '-wal', { force: true });
 fs.rmSync(DB_PATH + '-shm', { force: true });
 process.env.DADA_DB = DB_PATH;
 process.env.DADA_PORT = String(PORT);
+// S1 回归：强制走"文件密钥"路径（若外部环境恰好设置了 DADA_JWT_SECRET 则先摘掉，子进程同样继承不到）
+delete process.env.DADA_JWT_SECRET;
+// 记录密钥文件在本次测试启动前是否存在——决定是否断言"新生成密钥"的格式与权限
+const JWT_FILE = path.join(ROOT, 'data', '.jwt-secret');
+const jwtFileExistedAtStart = fs.existsSync(JWT_FILE);
 
 // 先导入依赖该 env 的模块
 await import('../src/db.js');
@@ -1386,6 +1391,185 @@ test('VD-02 jobs：14天过期 / done超72h互评提醒一次 / 老搭子同城�
   runJobs();
   const bN2 = await api('GET', '/api/notifications', null, tokenB);
   assert.equal(bN2.json.data.filter((n) => n.type === 'rate_reminder' && n.data && n.data.post_id === dpid).length, 1, '不重复提醒（防重标记生效）');
+});
+
+// ==================================================================
+// 评审 R1 修复回归（安全 S1/S2/S3/S8 + 架构 A1/A3/A7 + 用户批评 P0/P1）：
+// JWT 文件密钥 / 注册 gender·city 入库 / 举报去重与当日首扣 /
+// banned·deleted WS 状态复查 / 满员自动婉拒 / 登录每IP限流
+// ==================================================================
+
+test('JWT密钥：文件密钥生成与跨进程复用 + 伪造默认密钥 token 401（S1/A1）', async () => {
+  const { signToken, verifyToken } = await import('../src/util.js');
+  const jwt = (await import('jsonwebtoken')).default;
+  // 密钥文件存在且为强随机（新生成时 = crypto.randomBytes(32).hex、权限 600）
+  assert.ok(fs.existsSync(JWT_FILE), 'server/data/.jwt-secret 应存在');
+  const content = fs.readFileSync(JWT_FILE, 'utf8').trim();
+  assert.ok(content.length >= 64, '密钥长度应 ≥64 字符（32 字节 hex）');
+  if (!jwtFileExistedAtStart) {
+    assert.match(content, /^[0-9a-f]{64}$/, '新生成密钥应为 64 位 hex');
+    assert.equal(fs.statSync(JWT_FILE).mode & 0o777, 0o600, '密钥文件权限应为 600');
+  }
+  // 进程内 sign/verify 一致
+  const token = signToken({ id: 424242, username: 'jwt_check' });
+  const payload = verifyToken(token);
+  assert.ok(payload, 'signToken 后 verifyToken 应通过');
+  assert.equal(payload.uid, 424242);
+  // 进程内密钥 == 文件内容：用文件内容直接校验签名通过
+  assert.equal(jwt.verify(token, content).uid, 424242, '内存密钥应等于 .jwt-secret 文件内容');
+  // 跨进程复用：子进程重新加载 util.js（读同一密钥文件、独立临时库）签发，本进程可验证
+  const childToken = await new Promise((resolve, reject) => {
+    const p = spawn(process.execPath, [
+      '--input-type=module', '-e',
+      `const m = await import(${JSON.stringify(path.join(ROOT, 'src', 'util.js'))}); process.stdout.write(m.signToken({ id: 777777, username: 'crossproc' }));`,
+    ], { env: { ...process.env, DADA_DB: `/tmp/dada-jwt-test-${process.pid}.sqlite` } });
+    let out = '';
+    p.stdout.on('data', (d) => (out += d));
+    p.on('error', reject);
+    p.on('exit', () => resolve(out.trim()));
+  });
+  const cross = verifyToken(childToken);
+  assert.ok(cross, '子进程签发的 token 应可被本进程验证（两次进程读同一密钥文件）');
+  assert.equal(cross.uid, 777777);
+  // 攻击重放（S1 核心）：用旧默认密钥 'dada-dev-secret-change-me' 伪造 admin token → 必须失效
+  const forged = jwt.sign({ uid: 1, username: 'admin' }, 'dada-dev-secret-change-me');
+  assert.equal(verifyToken(forged), null, '默认密钥伪造的 token 校验必须失败');
+  const r = await api('GET', '/api/auth/me', null, forged);
+  assert.equal(r.status, 401, '伪造默认密钥 token 请求 /auth/me 应 401');
+});
+
+test('注册gender/city入库：女性手机号注册可申请并通过女生局（用户批评R1 P0）', async () => {
+  // 手机号注册模式不再硬编码 gender='secret', city=''
+  const sms = await api('POST', '/api/auth/sms/send', { phone: '13733334444' });
+  assert.equal(sms.status, 200, 'sms/send: ' + JSON.stringify(sms.json));
+  const reg = await api('POST', '/api/auth/register', {
+    phone: '13733334444', code: sms.json.data.demo_code, password: '123456',
+    nickname: 'Amy手机注册', adult_confirmed: true, gender: 'female', city: '北京',
+  });
+  assert.equal(reg.status, 200, 'register: ' + JSON.stringify(reg.json));
+  assert.equal(reg.json.data.user.gender, 'female', 'gender=female 应入库');
+  assert.equal(reg.json.data.user.city, '北京', 'city 应入库');
+  const tokenF = reg.json.data.token;
+  // 女性手机号注册用户申请女生局 → 不再被"该搭局仅限女生参加"拒绝
+  const post = await api('POST', '/api/posts', {
+    category: 'coffee', title: '女性注册回归女生局', content: 'x', city: '北京', gender_req: 'female',
+  }, tokenA); // A（tester_a）为女生
+  assert.equal(post.status, 200);
+  const pid = post.json.data.id;
+  const join = await api('POST', `/api/posts/${pid}/join`, { message: '我也是女生' }, tokenF);
+  assert.equal(join.status, 200, '女性注册用户应可申请女生局: ' + JSON.stringify(join.json));
+  // 组局者通过该申请（全链路闭环）
+  const joins = await api('GET', `/api/posts/${pid}/joins`, null, tokenA);
+  const j = joins.json.data.find((x) => x.user.id === reg.json.data.user.id);
+  assert.ok(j, '申请出现在列表中');
+  const ap = await api('POST', `/api/posts/${pid}/joins/${j.id}/approve`, { approve: true }, tokenA);
+  assert.equal(ap.status, 200, '女生局申请应可通过: ' + JSON.stringify(ap.json));
+  // 边界：非法 gender 回落 secret；city 截断到 60（与 PUT /me 对齐）
+  const sms2 = await api('POST', '/api/auth/sms/send', { phone: '13733335555' });
+  assert.equal(sms2.status, 200, '第二次 sms/send 不应被 IP 限流误伤');
+  const reg2 = await api('POST', '/api/auth/register', {
+    phone: '13733335555', code: sms2.json.data.demo_code, password: '123456',
+    nickname: '默认资料', adult_confirmed: true, gender: 'attack', city: '市'.repeat(100),
+  });
+  assert.equal(reg2.status, 200);
+  assert.equal(reg2.json.data.user.gender, 'secret', '非法 gender 回落 secret');
+  assert.equal(reg2.json.data.user.city.length, 60, 'city 截断到 60');
+});
+
+test('举报：24h内同reporter同target去重409 + 仅当日首次扣分（S2）', async () => {
+  const { db } = await import('../src/db.js');
+  // 全新 reporter×2 + 全新 target，避免与既有用例的举报记录相互干扰
+  const t1 = await api('POST', '/api/auth/register', { username: 's2_target', password: '123456', nickname: '被举报者' });
+  const t2 = await api('POST', '/api/auth/register', { username: 's2_reporter1', password: '123456', nickname: '举报者一' });
+  const t3 = await api('POST', '/api/auth/register', { username: 's2_reporter2', password: '123456', nickname: '举报者二' });
+  const targetId = t1.json.data.user.id;
+  const rp1 = t2.json.data.token, rp2 = t3.json.data.token;
+  const credit = () => db.prepare('SELECT credit FROM users WHERE id = ?').get(targetId).credit;
+  const credit0 = credit(); // 新用户 600
+  // 首次举报：200 且扣 20（当日首条）
+  const first = await api('POST', `/api/users/${targetId}/report`, { reason: '骚扰' }, rp1);
+  assert.equal(first.status, 200);
+  assert.equal(credit(), credit0 - 20, '当日首次被举报扣 20');
+  // 同一 reporter 24h 内重复举报 → 409，不再扣分、不再落库
+  const second = await api('POST', `/api/users/${targetId}/report`, { reason: '欺诈' }, rp1);
+  assert.equal(second.status, 409);
+  assert.equal(second.json.error, '已举报，请等待处理');
+  assert.equal(credit(), credit0 - 20, '重复举报不再扣分');
+  // 另一 reporter 同日举报 → 200 但不重复扣分（仅当日首条扣）
+  const third = await api('POST', `/api/users/${targetId}/report`, { reason: '骚扰' }, rp2);
+  assert.equal(third.status, 200);
+  assert.equal(credit(), credit0 - 20, '同日第二位举报者不重复扣分');
+  // 409 的重复举报未落库
+  const cnt = db.prepare("SELECT COUNT(*) c FROM reports WHERE target_type = 'user' AND target_id = ?").get(targetId).c;
+  assert.equal(cnt, 2, 'reports 表应只有 2 条（409 不落库）');
+});
+
+test('WS消息：banned/deleted 账号状态复查返回"账号状态异常"（S3/A7）', async () => {
+  const { handleChatMessage } = await import('../src/routes/chat.js');
+  const { db } = await import('../src/db.js');
+  const convs = await api('GET', '/api/chat/convs', null, tokenA);
+  const convAB = convs.json.data.find((c) => c.other && c.other.id === userIdB);
+  assert.ok(convAB, 'A↔B 会话存在');
+  // 模拟"残留连接"：封禁发生前拿到的用户快照（快照里 status 仍是 active）
+  const staleA = db.prepare('SELECT * FROM users WHERE id = ?').get(userIdA);
+  const before = db.prepare('SELECT COUNT(*) c FROM messages WHERE conv_id = ?').get(convAB.id).c;
+  // 封禁：即使传入的是封禁前的旧快照，服务端按库内实时状态拦截
+  db.prepare("UPDATE users SET status = 'banned' WHERE id = ?").run(userIdA);
+  const r1 = handleChatMessage(staleA, convAB.id, 'banned ghost message');
+  assert.equal(r1.error, '账号状态异常', 'banned 账号发消息应报账号状态异常');
+  // 注销（deleted）：同理拦截（S3 活幽灵连接）
+  db.prepare("UPDATE users SET status = 'deleted' WHERE id = ?").run(userIdA);
+  const r2 = handleChatMessage(staleA, convAB.id, 'deleted ghost message');
+  assert.equal(r2.error, '账号状态异常', 'deleted 账号发消息应报账号状态异常');
+  // 拦截的消息不得入库
+  const after = db.prepare('SELECT COUNT(*) c FROM messages WHERE conv_id = ?').get(convAB.id).c;
+  assert.equal(after, before, '状态异常的消息不得写入 messages');
+  // 恢复 active 后可正常发送
+  db.prepare("UPDATE users SET status = 'active' WHERE id = ?").run(userIdA);
+  const r3 = handleChatMessage(staleA, convAB.id, '恢复active后的正常消息');
+  assert.ok(!r3.error, '恢复 active 后应放行: ' + (r3.error || ''));
+});
+
+test('满员自动婉拒：帖子 full 时剩余 pending 置 rejected 并通知（用户批评R1 搭子王#3）', async () => {
+  const created = await api('POST', '/api/posts', {
+    category: 'pet', title: '满员婉拒回归局', content: 'x', city: '北京', need_count: 1,
+  }, tokenA);
+  assert.equal(created.status, 200);
+  const pid = created.json.data.id;
+  // B、C 同时申请（need_count=1，通过一人即满员）
+  await api('POST', `/api/posts/${pid}/join`, { message: '先到' }, tokenB);
+  await api('POST', `/api/posts/${pid}/join`, { message: '后到' }, tokenC);
+  const joins = await api('GET', `/api/posts/${pid}/joins`, null, tokenA);
+  const joinB = joins.json.data.find((x) => x.user.id === userIdB);
+  const ap = await api('POST', `/api/posts/${pid}/joins/${joinB.id}/approve`, { approve: true }, tokenA);
+  assert.equal(ap.status, 200);
+  // 帖子已满员 → C 的 pending 自动置 rejected（不再悬置）
+  const joins2 = await api('GET', `/api/posts/${pid}/joins`, null, tokenA);
+  const jc = joins2.json.data.find((x) => x.user.id === userIdC);
+  assert.equal(jc.status, 'rejected', '满员后剩余 pending 自动置 rejected');
+  // C 收到结果通知（带 post_id 供前端深链跳转）
+  const notifs = await api('GET', '/api/notifications', null, tokenC);
+  const n = notifs.json.data.find((x) => x.type === 'join_result' && x.data && x.data.post_id === pid);
+  assert.ok(n, 'C 应收到 join_result 通知');
+  assert.ok(n.body.includes('满员'), '通知正文应说明满员: ' + n.body);
+});
+
+test('登录限流：每IP 15分钟20次，超出429"尝试过于频繁"（S8）', async () => {
+  // 此前套件内已有若干次 /auth/login（同一测试出口 IP）——继续尝试直到触发限流窗口
+  let hitAt = -1;
+  for (let i = 0; i < 30; i++) {
+    const r = await api('POST', '/api/auth/login', { username: 'bruteforce_probe', password: 'wrong' + i });
+    if (r.status === 429) {
+      assert.equal(r.json.error, '尝试过于频繁，请稍后再试');
+      hitAt = i;
+      break;
+    }
+    assert.equal(r.status, 401, '限流触发前应为 401（账号不存在/密码错误）');
+  }
+  assert.ok(hitAt >= 0, '30 次内应触发 429 登录限流');
+  // 窗口期内继续请求仍被限流
+  const r2 = await api('POST', '/api/auth/login', { username: 'bruteforce_probe', password: 'x' });
+  assert.equal(r2.status, 429);
 });
 
 console.log('\n✅ 全部 API 测试通过');

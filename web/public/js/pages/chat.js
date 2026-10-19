@@ -14,7 +14,7 @@ App.register('chat', async (el) => {
     <div class="chat-split" style="display:flex; height:100%;">
       <aside class="conv-list-pane">
         <div class="conv-list-head">消息
-          <button class="navbar-btn" id="btn-notif" style="margin-left:auto; width:auto;">${UI.icon('bell', 20)}</button>
+          <button class="navbar-btn" id="btn-notif" aria-label="通知" style="margin-left:auto; width:auto;">${UI.icon('bell', 20)}</button>
         </div>
         <div class="conv-list-scroll" id="convs">${UI.loading()}</div>
       </aside>
@@ -27,7 +27,7 @@ App.register('chat', async (el) => {
     <div class="navbar">
       <div class="navbar-inner">
         <div class="navbar-title" style="text-align:left; font-size:var(--fs-title); font-weight:800;">消息</div>
-        <button class="navbar-btn" id="btn-notif">${UI.icon('bell', 20)}</button>
+        <button class="navbar-btn" id="btn-notif" aria-label="通知">${UI.icon('bell', 20)}</button>
       </div>
     </div>
     <div id="convs">${UI.loading()}</div>`;
@@ -44,7 +44,7 @@ App.register('chat', async (el) => {
         return;
       }
       box.innerHTML = list.map((c) => `
-        <div class="conv-item" data-id="${c.id}">
+        <div class="conv-item" data-id="${c.id}" role="link" tabindex="0" aria-label="与${UI.esc(c.other?.nickname || '已注销用户')}的会话${c.unread ? `，${c.unread} 条未读` : ''}" onkeydown="if(event.key==='Enter')App.navigate('#/conv/${c.id}')">
           ${UI.avatarHTML(c.other || {})}
           <div class="conv-main">
             <div class="conv-name">

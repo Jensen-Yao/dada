@@ -94,10 +94,15 @@ miscRouter.get('/for-you', requireAuth, (req, res) => {
   ];
 
   // 候选池（H.0）：开放帖 + 作者活跃 + 非本人 + 拉黑过滤；池内全量评分，不做任何随机打乱
+  // A3 修复：候选池限定最近 200 条开放帖。此前无 LIMIT 全量拉取——同步评分在事件循环里串行执行，
+  // 50k open 帖实测单请求 8.7s，期间全站（HTTP/WS/心跳）冻结。取舍：更早的开放帖不再进入个性化
+  // 排序（广场 feed 仍有全量分页兜底，且 >200 条之前的开放帖大概率已被 14 天过期任务回收），
+  // 换取时延上限可预测（200 行 × 2 次点查 + 排序，毫秒级）。
   const rows = db.prepare(`
     SELECT p.* FROM posts p JOIN users u ON p.user_id = u.id
     WHERE p.status = 'open' AND u.status = 'active' AND p.user_id != ?
       AND p.user_id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = ? UNION SELECT blocker_id FROM blocks WHERE blocked_id = ?)
+    ORDER BY p.id DESC LIMIT 200
   `).all(me.id, me.id, me.id);
 
   const getAuthor = db.prepare('SELECT * FROM users WHERE id = ?');

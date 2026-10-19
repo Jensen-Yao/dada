@@ -21,12 +21,7 @@ App.register('discover', async (el) => {
   let city = '';
   const cityCounts = {}; // 城市 → 开放局数（/cities 聚合，失败时用 recommend 列表长度兜底）
 
-  let meCity = window.__me?.city || '';
-  if (API.isLogin() && !meCity) {
-    try { meCity = (await API.get('/auth/me')).city || ''; } catch { /* ignore */ }
-  }
-  if (CITY_CHIPS.includes(meCity)) city = meCity;
-
+  // U5 骨架前置：先同步渲染页面骨架（热门区骨架屏），/auth/me 拉取放.paint 之后，弱网首屏不再空白
   el.innerHTML = `
   <div class="navbar">
     <div class="navbar-inner"><div class="navbar-title" style="text-align:left; font-size:var(--fs-title); font-weight:800;">发现搭子</div></div>
@@ -35,6 +30,12 @@ App.register('discover', async (el) => {
   <div class="city-count" id="city-count"></div>
   <div id="fy-part"></div>
   <div id="hot-part">${UI.wfSkeleton(6)}</div>`;
+
+  let meCity = window.__me?.city || '';
+  if (API.isLogin() && !meCity) {
+    try { meCity = (await API.get('/auth/me')).city || ''; } catch { /* ignore */ }
+  }
+  if (CITY_CHIPS.includes(meCity)) city = meCity;
 
   function chipsHTML() {
     return [...CITY_CHIPS, '全部'].map((c) => {

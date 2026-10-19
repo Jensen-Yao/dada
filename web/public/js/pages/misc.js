@@ -4,7 +4,7 @@ App.register('edit-profile', async (el) => {
   el.innerHTML = `
   <div class="navbar">
     <div class="navbar-inner">
-      <button class="navbar-btn" onclick="history.back()">‹</button>
+      <button class="navbar-btn" onclick="history.back()" aria-label="返回">‹</button>
       <div class="navbar-title">编辑资料</div>
       <div style="width:34px;"></div>
     </div>
@@ -17,28 +17,28 @@ App.register('edit-profile', async (el) => {
     </div>
   </div>
   <div class="form">
-    <div class="form-item"><label>昵称</label><input id="f-nick" class="input" maxlength="20" value="${UI.esc(me.nickname)}"></div>
-    <div class="form-item"><label>性别</label>
+    <div class="form-item"><label for="f-nick">昵称</label><input id="f-nick" class="input" maxlength="20" value="${UI.esc(me.nickname)}"></div>
+    <div class="form-item"><label for="f-gender">性别</label>
       <select id="f-gender" class="select">
         <option value="secret" ${me.gender === 'secret' ? 'selected' : ''}>保密</option>
         <option value="female" ${me.gender === 'female' ? 'selected' : ''}>女生</option>
         <option value="male" ${me.gender === 'male' ? 'selected' : ''}>男生</option>
       </select>
     </div>
-    <div class="form-item"><label>出生年份</label><input id="f-birth" class="input" type="number" placeholder="如 2000" value="${me.age ? new Date().getFullYear() - me.age : ''}"></div>
-    <div class="form-item"><label>城市</label><input id="f-city" class="input" value="${UI.esc(me.city || '')}" placeholder="如 北京"></div>
-    <div class="form-item"><label>学校 / 职业</label><input id="f-occ" class="input" maxlength="60" value="${UI.esc(me.school || me.occupation || '')}" placeholder="如 北京大学 / 产品经理"></div>
-    <div class="form-item"><label>MBTI</label>
+    <div class="form-item"><label for="f-birth">出生年份</label><input id="f-birth" class="input" type="number" placeholder="如 2000" value="${me.age ? new Date().getFullYear() - me.age : ''}"></div>
+    <div class="form-item"><label for="f-city">城市</label><input id="f-city" class="input" value="${UI.esc(me.city || '')}" placeholder="如 北京"></div>
+    <div class="form-item"><label for="f-occ">学校 / 职业</label><input id="f-occ" class="input" maxlength="60" value="${UI.esc(me.school || me.occupation || '')}" placeholder="如 北京大学 / 产品经理"></div>
+    <div class="form-item"><label for="f-mbti">MBTI</label>
       <select id="f-mbti" class="select">
         <option value="">不填</option>
         ${['INTJ','INTP','ENTJ','ENTP','INFJ','INFP','ENFJ','ENFP','ISTJ','ISFJ','ESTJ','ESFJ','ISTP','ISFP','ESTP','ESFP']
           .map((m) => `<option value="${m}" ${me.mbti === m ? 'selected' : ''}>${m}</option>`).join('')}
       </select>
     </div>
-    <div class="form-item"><label>个性签名</label><textarea id="f-bio" class="textarea" maxlength="200" placeholder="一句话介绍自己，让搭子更快了解你">${UI.esc(me.bio || '')}</textarea><div id="bio-count" style="text-align:right; font-size:11px; color:var(--text-3); margin-top:2px;"></div></div>
+    <div class="form-item"><label for="f-bio">个性签名</label><textarea id="f-bio" class="textarea" maxlength="200" placeholder="一句话介绍自己，让搭子更快了解你">${UI.esc(me.bio || '')}</textarea><div id="bio-count" style="text-align:right; font-size:11px; color:var(--text-3); margin-top:2px;"></div></div>
     <div class="form-item">
-      <label>兴趣标签（点击切换）</label>
-      <div id="tag-pick" style="display:flex; flex-wrap:wrap; gap:0;">
+      <label id="l-tags">兴趣标签（点击切换）</label>
+      <div id="tag-pick" role="group" aria-labelledby="l-tags" style="display:flex; flex-wrap:wrap; gap:0;">
         ${['美食', '运动', '健身', '跑步', '自习', '读书', '旅行', '徒步', '露营', 'livehouse', '摇滚', '游戏', '剧本杀', '桌游', '电影', '摄影', '扫街', '咖啡', '探店', '逛街', '遛狗', '猫奴', '拼车', '飞盘', '爬山', '骑行', '羽毛球', '滑雪']
           .map((t) => `<span class="tag ${(me.tags || []).includes(t) ? 'on' : ''}" data-tag="${t}">${t}</span>`).join('')}
       </div>
@@ -98,7 +98,7 @@ App.register('myposts', async (el) => {
   el.innerHTML = `
   <div class="navbar">
     <div class="navbar-inner">
-      <button class="navbar-btn" onclick="history.back()">‹</button>
+      <button class="navbar-btn" onclick="history.back()" aria-label="返回">‹</button>
       <div class="navbar-title">我的搭局</div>
       <div style="width:34px;"></div>
     </div>
@@ -110,6 +110,14 @@ App.register('myposts', async (el) => {
   <div id="list">${UI.loading()}</div>`;
 
   let type = 'published';
+  // R2-N2: 无发布记录的新用户默认落在"我参加的"，避免首屏空态（小林#3）
+  try {
+    const published = await API.get('/my/posts/published');
+    if (!published.length) {
+      type = 'joined';
+      el.querySelectorAll('[data-t]').forEach((x) => x.classList.toggle('selected', x.dataset.t === 'joined'));
+    }
+  } catch { /* 保持默认 */ }
   el.querySelectorAll('[data-t]').forEach((b) => {
     b.onclick = async () => {
       type = b.dataset.t;
@@ -130,7 +138,7 @@ App.register('myposts', async (el) => {
       const [st, cls] = statusMap[p.status] || ['未知', 'gray'];
       const jm = p.my_join === 'pending' ? ['申请中', 'yellow'] : p.my_join === 'approved' ? ['已通过', 'green'] : p.my_join === 'rejected' ? ['未通过', 'gray'] : null;
       return `
-      <div class="card post-card" data-id="${p.id}">
+      <div class="card post-card" data-id="${p.id}" role="link" tabindex="0" aria-label="${UI.esc(p.title)}" onkeydown="if(event.key==='Enter')App.navigate('#/post/${p.id}')">
         <div class="post-emoji">${UI.catIcon(p.category, 26)}</div>
         <div class="post-main">
           <div style="display:flex; gap:6px; align-items:flex-start;">
@@ -159,7 +167,7 @@ App.register('ratings', async (el) => {
   el.innerHTML = `
   <div class="navbar">
     <div class="navbar-inner">
-      <button class="navbar-btn" onclick="history.back()">‹</button>
+      <button class="navbar-btn" onclick="history.back()" aria-label="返回">‹</button>
       <div class="navbar-title">收到的评价</div>
       <div style="width:34px;"></div>
     </div>
@@ -191,7 +199,7 @@ App.register('notifications', async (el) => {
   el.innerHTML = `
   <div class="navbar">
     <div class="navbar-inner">
-      <button class="navbar-btn" onclick="history.back()">‹</button>
+      <button class="navbar-btn" onclick="history.back()" aria-label="返回">‹</button>
       <div class="navbar-title">通知</div>
       <button class="navbar-btn" id="btn-read-all" style="font-size:12px; width:auto; padding:0 8px;">全部已读</button>
     </div>
@@ -209,7 +217,7 @@ App.register('notifications', async (el) => {
       return;
     }
     box.innerHTML = list.map((n) => `
-      <div class="notif-item" style="${n.read ? 'opacity:0.6;' : ''}">
+      <div class="notif-item${n.data?.post_id ? ' notif-link' : ''}" data-nid="${n.id}" data-post="${n.data?.post_id || ''}" style="${n.read ? 'opacity:0.6;' : ''}" ${n.data?.post_id ? 'role="link" tabindex="0" aria-label="' + UI.esc(n.title) + '，查看详情"' : ''}>
         <div class="notif-icon${n.type === 'sos' || n.type === 'warning' ? ' danger' : ''}">${UI.icon(icons[n.type] || 'bell', 16)}</div>
         <div class="notif-body">
           <div class="notif-title">${UI.esc(n.title)} ${n.read ? '' : '<span style="display:inline-block;width:7px;height:7px;background:var(--danger);border-radius:50%;margin-left:4px;"></span>'}</div>
@@ -217,6 +225,15 @@ App.register('notifications', async (el) => {
           <div style="font-size:11px; color:var(--text-3); margin-top:2px;">${UI.timeAgo(n.created_at)}</div>
         </div>
       </div>`).join('');
+    // 用户批评R1[搭子王#2]：带 post_id 的通知深链到帖子详情（申请/点赞/互评等可一步到达现场）；
+    // credit/warning 等无 post_id 的通知保持不可点
+    box.querySelectorAll('.notif-item').forEach((item) => {
+      const pid = parseInt(item.dataset.post, 10);
+      if (!pid) return;
+      const go = () => App.navigate('#/post/' + pid);
+      item.onclick = go;
+      item.onkeydown = (e) => { if (e.key === 'Enter') go(); };
+    });
   }
 
   el.querySelector('#btn-read-all').onclick = async () => {
@@ -227,8 +244,12 @@ App.register('notifications', async (el) => {
   };
 
   await load();
-  await API.post('/notifications/read', {}).catch(() => {});
-  App.refreshBadges();
+  // R2-N4: 停留 5 秒后才标全读，避免"进页即清角标"（深链跳转者保留未读态）
+  const readTimer = setTimeout(async () => {
+    await API.post('/notifications/read', {}).catch(() => {});
+    App.refreshBadges();
+  }, 5000);
+  App.onCleanup(() => clearTimeout(readTimer));
 });
 
 /* ================= 安全中心 ================= */
@@ -237,7 +258,7 @@ App.register('safety', async (el) => {
   el.innerHTML = `
   <div class="navbar">
     <div class="navbar-inner">
-      <button class="navbar-btn" onclick="history.back()">‹</button>
+      <button class="navbar-btn" onclick="history.back()" aria-label="返回">‹</button>
       <div class="navbar-title">安全中心</div>
       <div style="width:34px;"></div>
     </div>
@@ -269,10 +290,10 @@ App.register('safety', async (el) => {
     const yes = await UI.confirm('确认发起<b>紧急求助</b>吗？<br><span style="font-size:12px;color:var(--text-3)">平台风控会立即收到你的求助信息</span>', { okText: '立即求助', danger: true });
     if (!yes) return;
     const s = UI.sheet('紧急求助', `
-      <input id="f-loc" class="input" placeholder="当前位置（如：五道口地铁站）">
-      <textarea id="f-note" class="textarea" style="margin-top:10px;" placeholder="描述情况（选填）"></textarea>
+      <input id="f-loc" class="input" aria-label="当前位置" placeholder="当前位置（如：五道口地铁站）">
+      <textarea id="f-note" class="textarea" aria-label="情况描述（选填）" style="margin-top:10px;" placeholder="描述情况（选填）"></textarea>
       <button class="btn danger block" id="btn-go" style="margin-top:12px;">发送求助</button>
-      <div style="text-align:center; margin-top:10px; font-size:12.5px; color:var(--danger);">如遇人身危险，请立即拨打 110</div>`);
+      <div style="text-align:center; margin-top:10px; font-size:12.5px; color:var(--danger);">如遇人身危险，请立即拨打 110</div>`, { cancel: true });
     s.el.querySelector('#btn-go').onclick = async () => {
       try {
         const r = await API.post('/safety/sos', {
@@ -294,7 +315,7 @@ App.register('settings', async (el) => {
   el.innerHTML = `
   <div class="navbar">
     <div class="navbar-inner">
-      <button class="navbar-btn" onclick="history.back()">‹</button>
+      <button class="navbar-btn" onclick="history.back()" aria-label="返回">‹</button>
       <div class="navbar-title">设置</div>
       <div style="width:34px;"></div>
     </div>
@@ -308,6 +329,11 @@ App.register('settings', async (el) => {
       <span class="cell-icon">${UI.icon('star', 18)}</span>
       <span class="cell-main">个性化推荐<span class="cell-sub">根据搭子偏好推荐内容，关闭后按热门展示</span></span>
       <button class="switch${recOff ? '' : ' on'}" id="sw-rec" type="button" role="switch" aria-checked="${String(!recOff)}" aria-label="个性化推荐开关"><span class="knob"></span></button>
+    </div>
+    <div class="cell" id="c-bigfont">
+      <span class="cell-icon">${UI.icon('file-text', 18)}</span>
+      <span class="cell-main">大字模式<span class="cell-sub">放大界面文字，适合视力不佳或年长用户</span></span>
+      <button class="switch${localStorage.getItem('dada_bigfont') === '1' ? ' on' : ''}" id="sw-bigfont" type="button" role="switch" aria-checked="${String(localStorage.getItem('dada_bigfont') === '1')}" aria-label="大字模式开关"><span class="knob"></span></button>
     </div>
   </div>
   <div style="margin:0 14px 14px; border-radius:16px; overflow:hidden; box-shadow:var(--shadow);">
@@ -337,6 +363,23 @@ App.register('settings', async (el) => {
     } catch (err) { UI.toast(err.message); }
   };
 
+  // 老王P0：大字模式开关——localStorage dada_bigfont + html[data-bigfont]（app.css 覆盖层），即时生效
+  const swBig = el.querySelector('#sw-bigfont');
+  const paintBigfont = () => {
+    const on = localStorage.getItem('dada_bigfont') === '1';
+    swBig.classList.toggle('on', on);
+    swBig.setAttribute('aria-checked', String(on));
+    if (on) document.documentElement.dataset.bigfont = '1';
+    else delete document.documentElement.dataset.bigfont;
+  };
+  paintBigfont();
+  swBig.onclick = () => {
+    if (localStorage.getItem('dada_bigfont') === '1') localStorage.removeItem('dada_bigfont');
+    else localStorage.setItem('dada_bigfont', '1');
+    paintBigfont();
+    UI.toast(localStorage.getItem('dada_bigfont') === '1' ? '大字模式已开启' : '大字模式已关闭');
+  };
+
   // 合规：注销账号（红字入口 → 后果说明 + 手动输入 DELETE 确认 → 不可恢复）
   el.querySelector('#c-del').onclick = () => {
     const s = UI.sheet('注销账号', `
@@ -349,8 +392,8 @@ App.register('settings', async (el) => {
         </ul>
       </div>
       <div class="del-confirm-tip">如确认注销，请输入 <b>DELETE</b>：</div>
-      <input id="f-del" class="input" placeholder="输入 DELETE 确认" autocomplete="off" spellcheck="false">
-      <button class="btn danger solid block" id="btn-del" style="margin-top:12px;" disabled>确认注销</button>`);
+      <input id="f-del" class="input" aria-label="输入 DELETE 确认注销" placeholder="输入 DELETE 确认" autocomplete="off" spellcheck="false">
+      <button class="btn danger solid block" id="btn-del" style="margin-top:12px;" disabled>确认注销</button>`, { cancel: true });
     const input = s.el.querySelector('#f-del');
     const btnDel = s.el.querySelector('#btn-del');
     input.addEventListener('input', () => { btnDel.disabled = input.value.trim() !== 'DELETE'; });
@@ -379,7 +422,7 @@ App.register('settings', async (el) => {
           ${UI.avatarHTML(u)}
           <span style="flex:1; font-weight:600;">${UI.esc(u.nickname)}</span>
           <button class="btn plain sm" data-un="${u.id}">取消拉黑</button>
-        </div>`).join('')}` : '<div style="text-align:center; color:var(--text-3); padding:20px;">黑名单为空</div>');
+        </div>`).join('')}` : '<div style="text-align:center; color:var(--text-3); padding:20px;">黑名单为空</div>', { cancel: true });
     s.el.querySelectorAll('[data-un]').forEach((b) => {
       b.onclick = async () => {
         await API.del(`/users/${b.dataset.un}/block`);
@@ -403,7 +446,7 @@ App.register('partners', async (el) => {
   el.innerHTML = `
   <div class="navbar">
     <div class="navbar-inner">
-      <button class="navbar-btn" onclick="history.back()">‹</button>
+      <button class="navbar-btn" onclick="history.back()" aria-label="返回">‹</button>
       <div class="navbar-title">我的搭友</div>
       <div style="width:34px;"></div>
     </div>
@@ -424,7 +467,7 @@ App.register('partners', async (el) => {
       return;
     }
     box.innerHTML = list.map((u) => `
-      <div class="partner-row" data-id="${u.id}">
+      <div class="partner-row" data-id="${u.id}" role="link" tabindex="0" aria-label="${UI.esc(u.nickname)}，搭过 ${u.times || 1} 次" onkeydown="if(event.key==='Enter')App.navigate('#/user/${u.id}')">
         ${UI.avatarHTML(u)}
         <div class="partner-info">
           <div class="partner-name">${UI.esc(u.nickname)} ${UI.genderBadge(u.gender)}</div>

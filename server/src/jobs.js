@@ -9,6 +9,7 @@ const EXPIRE_DAYS = 14;                        // open 帖发布超 14 天未成
 const RATE_REMIND_HOURS = 72;                  // done 超 72h 仍未互评 → 提醒（互评是信用飞轮入口）
 const PARTNER_PUSH_WINDOW_MS = 24 * 3600_000;  // 老搭子推送只扫近 24h 新帖（events 防重天然幂等）
 const PARTNER_PUSH_DAILY_CAP = 2;              // 每接收者每日 ≤2 条，防打扰（规格 VD-02-3）
+const EVENTS_TTL_DAYS = 90;                    // events 保留 90 天（A8：埋点表按浏览量线性膨胀，无上限）
 
 // ① 搭局自动过期：僵尸 open 帖让供给新鲜度失真 → 置 expired 并通知组局者
 function jobExpirePosts() {
@@ -91,15 +92,28 @@ function jobPartnerPush() {
   return sent;
 }
 
+// ④ events TTL 清理（A8）：删除 90 天前埋点行（含游客浏览 post_view），每天最多执行一次。
+// 注意：partner_push / rate_reminder 防重标记依赖 events——90 天前的推送/提醒标记过期无影响
+// （对应帖子早已过期/互评窗口关闭），删除安全。
+let lastEventsCleanDay = 0;
+function jobCleanEvents() {
+  const day = Math.floor(now() / 86400000);
+  if (day === lastEventsCleanDay) return 0; // 每天一轮即可，10 分钟粒度的轮询直接跳过
+  lastEventsCleanDay = day;
+  return db.prepare('DELETE FROM events WHERE created_at < ?').run(now() - EVENTS_TTL_DAYS * 86400000).changes;
+}
+
 // 单轮执行（导出供测试与手动触发）；返回各任务结果摘要
 export function runJobs() {
   let expired = 0;
   let reminded = [];
   let pushed = 0;
+  let cleaned = 0;
   try { expired = jobExpirePosts(); } catch (e) { console.error('[dada] jobs 过期任务失败:', e.message); }
   try { reminded = jobRateReminders(); } catch (e) { console.error('[dada] jobs 互评提醒任务失败:', e.message); }
   try { pushed = jobPartnerPush(); } catch (e) { console.error('[dada] jobs 老搭子推送任务失败:', e.message); }
-  return { expired, reminded, pushed };
+  try { cleaned = jobCleanEvents(); } catch (e) { console.error('[dada] jobs events清理任务失败:', e.message); }
+  return { expired, reminded, pushed, cleaned };
 }
 
 let timer = null;
@@ -109,5 +123,5 @@ export function startJobs() {
     try { runJobs(); } catch { /* 双保险：绝不向进程冒泡 */ }
   }, INTERVAL_MS);
   timer.unref(); // 不阻止进程退出
-  console.log('[dada] 定时任务已启动（每 10 分钟：搭局过期 / 互评提醒 / 老搭子推送）');
+  console.log('[dada] 定时任务已启动（每 10 分钟：搭局过期 / 互评提醒 / 老搭子推送；每日：events 90天清理）');
 }

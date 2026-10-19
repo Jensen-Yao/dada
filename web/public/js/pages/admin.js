@@ -7,7 +7,7 @@ App.register('admin', async (el) => {
     el.innerHTML = `
     <div class="navbar">
       <div class="navbar-inner">
-        <button class="navbar-btn" onclick="history.back()">‹</button>
+        <button class="navbar-btn" onclick="history.back()" aria-label="返回">‹</button>
         <div class="navbar-title">运营后台</div>
         <div style="width:34px;"></div>
       </div>
@@ -27,7 +27,7 @@ App.register('admin', async (el) => {
   el.innerHTML = `
   <div class="navbar">
     <div class="navbar-inner">
-      <button class="navbar-btn" onclick="history.back()">‹</button>
+      <button class="navbar-btn" onclick="history.back()" aria-label="返回">‹</button>
       <div class="navbar-title">运营后台</div>
       <div style="width:34px;"></div>
     </div>

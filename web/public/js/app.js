@@ -44,7 +44,6 @@ const App = (() => {
   const tabbar = document.getElementById('tabbar');
   const routes = {};
   let currentTab = '';
-  let metaCache = null;
 
   // ---------- H1 页级清理机制 ----------
   // 页面通过 App.onCleanup(fn) 注册卸载回调（WS.off、定时器、全局监听等），
@@ -61,9 +60,15 @@ const App = (() => {
 
   function register(name, render) { routes[name] = render; }
 
-  async function meta() {
-    if (!metaCache) metaCache = await API.get('/meta');
-    return metaCache;
+  // U5：meta 模块级缓存 promise——页面骨架先行渲染、meta 与列表并行/复用，
+  // 二次进入任何页面零等待；失败自动失效，下次调用重新拉取
+  let metaPromise = null;
+  function meta() {
+    if (!metaPromise) {
+      metaPromise = API.get('/meta');
+      metaPromise.catch(() => { metaPromise = null; });
+    }
+    return metaPromise;
   }
 
   function navigate(hash) { location.hash = hash; }
@@ -105,7 +110,7 @@ const App = (() => {
     el.innerHTML = `
     <div class="navbar">
       <div class="navbar-inner">
-        <button class="navbar-btn" onclick="history.back()">‹</button>
+        <button class="navbar-btn" onclick="history.back()" aria-label="返回">‹</button>
         <div class="navbar-title">内容不存在</div>
         <div style="width:34px;"></div>
       </div>
@@ -125,6 +130,22 @@ const App = (() => {
 
   const NOT_FOUND_RE = /不存在|无权|已删除|已注销/;
 
+  /* 用户批评R1[小林#1]：注册引导只挂在发现页，落地广场的新用户永远看不到 →
+   * 全局兜底：登录态 + 待引导（dada_need_onboard==='1'）+ 未处理过（无 dada_onboarded）
+   * + 当前不在发现页 → 5 秒后跳 #/discover（引导 sheet 逻辑仍在 discover，触发时再校验标记）。
+   * 选最小方案：不在各页面复制引导逻辑，只做一次"指路"。 */
+  let onboardHintTimer = 0;
+  function scheduleOnboardHint(page) {
+    clearTimeout(onboardHintTimer);
+    const needOnboard = () => API.isLogin()
+      && localStorage.getItem('dada_need_onboard') === '1'
+      && !localStorage.getItem('dada_onboarded');
+    if (!needOnboard() || page === 'discover') return;
+    onboardHintTimer = setTimeout(() => {
+      if (needOnboard() && !location.hash.startsWith('#/discover')) navigate('#/discover');
+    }, 5000);
+  }
+
   async function render() {
     const hash = location.hash || '#/';
     const [, path] = hash.split('#/');
@@ -138,6 +159,9 @@ const App = (() => {
       location.hash = '#/login';
       return;
     }
+
+    // 新用户引导兜底（详见 scheduleOnboardHint 注释）
+    scheduleOnboardHint(page);
 
     // 页面标记：桌面端样式（desktop.css）按 body[data-page] 精准生效
     document.body.dataset.page = page;

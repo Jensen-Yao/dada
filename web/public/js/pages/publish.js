@@ -12,7 +12,7 @@ App.register('publish', async (el, _seg, query) => {
   el.innerHTML = `
   <div class="navbar">
     <div class="navbar-inner">
-      <button class="navbar-btn" onclick="history.back()">‹</button>
+      <button class="navbar-btn" onclick="history.back()" aria-label="返回">‹</button>
       <div class="navbar-title">发布搭局</div>
       <div style="width:34px;"></div>
     </div>
@@ -29,8 +29,8 @@ App.register('publish', async (el, _seg, query) => {
 
   <div class="form">
     <div class="form-item">
-      <label>搭什么 <span class="req">*</span></label>
-      <div class="cat-grid" id="cat-grid">
+      <label id="l-cat">搭什么 <span class="req">*</span></label>
+      <div class="cat-grid" id="cat-grid" role="group" aria-labelledby="l-cat">
         ${meta.categories.map((c) => `
           <button class="cat-item" data-cat="${c.key}">
             <span class="cat-thumb"><img src="/img/photos/${c.key}-1.jpg" alt="" loading="lazy"></span>${c.name}
@@ -39,49 +39,49 @@ App.register('publish', async (el, _seg, query) => {
     </div>
 
     <div class="form-item">
-      <label>标题 <span class="req">*</span></label>
+      <label for="f-title">标题 <span class="req">*</span></label>
       <input id="f-title" class="input" maxlength="40" placeholder="一句话说明，如：周六五道口找饭搭子">
     </div>
 
     <div class="form-item">
-      <label>详细说说</label>
+      <label for="f-content">详细说说</label>
       <textarea id="f-content" class="textarea" maxlength="1000" placeholder="安排、路线、口味偏好、想要什么样的搭子…"></textarea>
     </div>
 
     <div class="form-item">
-      <label>城市 <span class="req">*</span></label>
+      <label for="f-city">城市 <span class="req">*</span></label>
       <input id="f-city" class="input" placeholder="如：北京" value="${UI.esc(me?.city || '')}">
     </div>
 
     <div class="form-item">
-      <label>地点（选填）</label>
+      <label for="f-loc">地点（选填）</label>
       <input id="f-loc" class="input" maxlength="50" placeholder="如：五道口 / 奥森南园">
     </div>
 
     <div class="form-item">
-      <label>时间</label>
+      <label for="f-time">时间</label>
       <input id="f-time" class="input" maxlength="30" placeholder="如：本周六 11:30">
     </div>
 
     <div class="form-item">
-      <label>还找几个人</label>
-      <div class="pub-counter">
-        <button class="btn plain sm" id="cnt-minus" style="width:40px;">−</button>
+      <label id="l-count">还找几个人</label>
+      <div class="pub-counter" id="pub-counter" role="group" aria-labelledby="l-count">
+        <button class="btn plain sm" id="cnt-minus" aria-label="减少人数" style="width:40px;">−</button>
         <b id="cnt-val" class="pub-cnt-val">1</b>
-        <button class="btn plain sm" id="cnt-plus" style="width:40px;">＋</button>
+        <button class="btn plain sm" id="cnt-plus" aria-label="增加人数" style="width:40px;">＋</button>
       </div>
     </div>
 
     <div class="form-item">
-      <label>费用方式</label>
-      <div class="seg" id="fee-seg">
+      <label id="l-fee">费用方式</label>
+      <div class="seg" id="fee-seg" role="group" aria-labelledby="l-fee">
         ${meta.fee_modes.map((f) => `<button data-fee="${f.key}">${f.name}</button>`).join('')}
       </div>
     </div>
 
     <div class="form-item">
-      <label>搭子性别要求</label>
-      <div class="seg" id="gender-seg">
+      <label id="l-gender">搭子性别要求</label>
+      <div class="seg" id="gender-seg" role="group" aria-labelledby="l-gender">
         ${meta.gender_reqs.map((g) => `<button data-g="${g.key}">${g.name}</button>`).join('')}
       </div>
       <div id="female-tip" class="pub-female-tip hidden">
@@ -90,7 +90,7 @@ App.register('publish', async (el, _seg, query) => {
     </div>
 
     <div class="form-item">
-      <label>配图（最多3张，让搭子更想加入）</label>
+      <label for="f-images">配图（最多3张，让搭子更想加入）</label>
       <div class="img-pick-row" id="img-picks">
         <div class="img-pick-add" id="img-add">${UI.icon('camera', 20)}<span>添加图片</span></div>
       </div>
@@ -98,7 +98,7 @@ App.register('publish', async (el, _seg, query) => {
     </div>
 
     <div class="form-item">
-      <label>其他要求（选填）</label>
+      <label for="f-req">其他要求（选填）</label>
       <input id="f-req" class="input" maxlength="100" placeholder="如：能吃辣、不迟到、有基础">
     </div>
 
@@ -164,8 +164,8 @@ App.register('publish', async (el, _seg, query) => {
     const row = $('img-picks');
     row.innerHTML = pickedFiles.map((f, i) => `
       <div style="position:relative;">
-        <img class="img-pick" src="${URL.createObjectURL(f)}" alt="">
-        <button class="img-pick-del" data-del="${i}">${UI.icon('x', 12)}</button>
+        <img class="img-pick" src="${URL.createObjectURL(f)}" alt="配图预览">
+        <button class="img-pick-del" data-del="${i}" aria-label="删除图片">${UI.icon('x', 12)}</button>
       </div>`).join('') +
       (pickedFiles.length < 3 ? `<div class="img-pick-add" id="img-add">${UI.icon('camera', 20)}<span>添加图片</span></div>` : '');
     row.querySelector('#img-add')?.addEventListener('click', () => imgInput.click());

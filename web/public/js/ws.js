@@ -30,9 +30,14 @@ const WS = (() => {
       } catch { /* ignore */ }
     };
 
-    sock.onclose = () => {
+    sock.onclose = (event) => {
       clearInterval(pingTimer);
       sock = null;
+      // R2-N6: 服务端 4001=认证失败（token失效），不自动重连避免空转
+      if (event && event.code === 4001) {
+        retry = 99;
+        return;
+      }
       // 断线重连（指数退避，上限30s）
       if (API.isLogin()) {
         retry++;

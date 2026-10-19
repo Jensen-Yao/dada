@@ -20,7 +20,12 @@ const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     if (/^image\/(png|jpe?g|webp|gif)$/.test(file.mimetype)) cb(null, true);
-    else cb(new Error('仅支持图片文件'));
+    else {
+      // 自定义 filter 错误标记 400（S11）：否则落入全局 error handler 的 500 兜底
+      const e = new Error('仅支持图片文件');
+      e.status = 400;
+      cb(e);
+    }
   },
 });
 
@@ -205,10 +210,25 @@ usersRouter.post('/:id/report', requireAuth, (req, res) => {
   if (!reasons.includes(reason)) return res.status(400).json({ error: '请选择举报理由' });
   const targetId = parseInt(req.params.id);
   if (!db.prepare('SELECT 1 FROM users WHERE id = ?').get(targetId)) return res.status(404).json({ error: '用户不存在' });
+  // S2 修复：同一 reporter 对同一 target 24h 内仅允许举报一次——
+  // 此前可无限刷：单人即可把任意用户搭力值打到 0（每次 -20）并灌爆管理后台 moderation 队列。
+  const dup = db.prepare(`
+    SELECT 1 FROM reports
+    WHERE reporter_id = ? AND target_type = 'user' AND target_id = ? AND created_at > ?
+  `).get(req.user.id, targetId, now() - 24 * 3600_000);
+  if (dup) return res.status(409).json({ error: '已举报，请等待处理' });
   db.prepare('INSERT INTO reports (reporter_id, target_type, target_id, reason, detail, created_at) VALUES (?,?,?,?,?,?)')
     .run(req.user.id, 'user', targetId, reason, String(detail || '').slice(0, 500), now());
-  // 演示环境自动处理：扣除对方搭力值并通知（真实环境由风控团队介入）
-  addCredit(targetId, -20, '收到举报，等待核实');
+  // 演示环境自动处理（真实环境由风控团队介入）。扣分仅当该 target 今日首次被举报：
+  // 多个举报者针对同一人只扣一次 20 分，举报不再等于"定向扣分武器"。
+  const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0);
+  const todayReports = db.prepare(`
+    SELECT COUNT(*) c FROM reports
+    WHERE target_type = 'user' AND target_id = ? AND created_at >= ?
+  `).get(targetId, dayStart.getTime()).c;
+  if (todayReports === 1) {
+    addCredit(targetId, -20, '收到举报，等待核实');
+  }
   res.json(ok({ reported: true }));
 });
 

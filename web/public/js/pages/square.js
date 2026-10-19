@@ -1,6 +1,7 @@
 /* ================= 广场页（搭局列表 · 双列瀑布流 H5-06~08） ================= */
 App.register('square', async (el, _seg, query) => {
-  const meta = await App.meta();
+  // U5 骨架前置：先同步渲染头部骨架（分类条占位）+ 瀑布流骨架再 await meta——
+  // 弱网首屏不再整页空白约 2s；meta 走 App 级缓存 promise，二次进入零等待
   // H5-09 触底加载：page 当前页码 / hasMore 还有下一页 / loadingMore 触底请求防重入
   const state = {
     city: query.get('city') || '',
@@ -14,6 +15,7 @@ App.register('square', async (el, _seg, query) => {
   const PAGE_SIZE = 10;
   // 请求序号：筛选切换后晚到的旧响应（翻页竞态）直接丢弃
   let fetchSeq = 0;
+  let meta = null; // 首帧骨架渲染后填充（catBarHTML 依赖）
 
   async function fetchList(page) {
     const params = new URLSearchParams();
@@ -30,45 +32,35 @@ App.register('square', async (el, _seg, query) => {
     return UI.pinCard(p);
   }
 
-  function renderHeader() {
-    const cats = [{ key: '', name: '全部' }, ...meta.categories];
+  // withCats=false：首帧骨架态（分类条留空，meta 到达后补齐）
+  function renderHeader(withCats) {
     return `
     <div class="navbar">
       <div class="navbar-inner">
         <div class="navbar-title" style="text-align:left; font-size:var(--fs-title); font-weight:800;">搭搭</div>
-        <button class="navbar-btn" id="btn-city" style="font-size:13px; width:auto; padding:0 10px; background:var(--primary-soft); color:var(--primary-deep); border-radius:10px; font-weight:600; gap:4px;">${UI.icon('location', 13)}${UI.esc(state.city || '全部城市')}</button>
-        <button class="navbar-btn" id="btn-notif" style="position:relative">${UI.icon('bell', 20)}</button>
+        <button class="navbar-btn" id="btn-city" aria-label="选择城市" style="font-size:13px; width:auto; padding:0 10px; background:var(--primary-soft); color:var(--primary-deep); border-radius:10px; font-weight:600; gap:4px;">${UI.icon('location', 13)}${UI.esc(state.city || '全部城市')}</button>
+        <button class="navbar-btn" id="btn-notif" aria-label="通知" style="position:relative">${UI.icon('bell', 20)}</button>
       </div>
       <div style="padding: 0 14px 10px;">
         <div class="search-bar">
           ${UI.icon('search', 16)}
-          <input id="f-kw" placeholder="搜索搭局：火锅、自习、livehouse…" value="${UI.esc(state.keyword)}">
+          <input id="f-kw" aria-label="搜索搭局" placeholder="搜索搭局：火锅、自习、livehouse…" value="${UI.esc(state.keyword)}">
         </div>
       </div>
-      <div class="navbar-sub" id="cat-bar">
-        ${cats.map((c) => `
-          <button class="pill ${state.category === c.key ? '' : 'gray'}" data-cat="${c.key}" style="white-space:nowrap; padding:5px 13px; font-size:12.5px; flex-shrink:0;">
-            ${c.name}
-          </button>`).join('')}
-        <button class="pill ${state.sort === 'hot' ? '' : 'gray'}" id="btn-sort" style="white-space:nowrap; padding:5px 13px; font-size:12.5px; flex-shrink:0;">热门</button>
-      </div>
+      <div class="navbar-sub" id="cat-bar">${withCats && meta ? catBarHTML() : ''}</div>
     </div>`;
   }
 
-  async function render() {
-    el.innerHTML = renderHeader() + `<div id="list">${UI.wfSkeleton(6)}</div>`;
-
+  function bindHeader() {
     el.querySelector('#btn-notif').onclick = () => API.isLogin() ? App.navigate('#/notifications') : UI.requireLogin();
     el.querySelector('#f-kw').addEventListener('change', (e) => { state.keyword = e.target.value.trim(); refreshList(); });
     el.querySelector('#f-kw').addEventListener('keydown', (e) => { if (e.key === 'Enter') e.target.blur(); });
-    el.querySelector('#btn-sort').onclick = () => {
-      state.sort = state.sort === 'hot' ? 'new' : 'hot';
-      el.querySelector('#cat-bar').innerHTML = catBarHTML();
-      bindCatBar();
-      refreshList();
-    };
     el.querySelector('#btn-city').onclick = cityPicker;
+  }
 
+  async function render() {
+    el.innerHTML = renderHeader(true) + `<div id="list">${UI.wfSkeleton(6)}</div>`;
+    bindHeader();
     bindCatBar();
     await refreshList();
   }
@@ -194,7 +186,8 @@ App.register('square', async (el, _seg, query) => {
   }
 
   function cityPicker() {
-    const s = UI.sheet('选择城市', `<div id="city-list">${UI.loading()}</div>`);
+    // U4：城市选择 sheet 底部补"取消"出口
+    const s = UI.sheet('选择城市', `<div id="city-list">${UI.loading()}</div>`, { cancel: true });
     API.get('/cities').then((cities) => {
       const quick = ['北京', '上海', '广州', '深圳', '成都', '杭州', '武汉', '西安', '南京', '重庆'];
       const all = [...new Set([...quick, ...cities.map((c) => c.city)])];
@@ -217,5 +210,11 @@ App.register('square', async (el, _seg, query) => {
     });
   }
 
-  await render();
+  // U5：首帧同步渲染骨架（头部 + 瀑布流）→ meta 到达补分类条 → 拉列表
+  el.innerHTML = renderHeader(false) + `<div id="list">${UI.wfSkeleton(6)}</div>`;
+  bindHeader();
+  meta = await App.meta();
+  el.querySelector('#cat-bar').innerHTML = catBarHTML();
+  bindCatBar();
+  await refreshList();
 });

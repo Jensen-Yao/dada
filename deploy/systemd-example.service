@@ -37,8 +37,11 @@ ExecStart=/usr/bin/node /opt/dada/server/src/index.js
 Environment=DADA_PORT=3000
 Environment=DADA_DB=/var/lib/dada/dada.sqlite
 Environment=NODE_ENV=production
-# 生产必须设置 JWT 签名密钥（生成：openssl rand -hex 32）：
-# Environment=DADA_JWT_SECRET=please-change-me-to-a-long-random-string
+# JWT 签名密钥【生产必须设置】（生成：openssl rand -hex 32）：
+# 未设置时应用会自动生成随机密钥并持久化到 <data目录>/.jwt-secret（本例为 /var/lib/dada/.jwt-secret
+# 或代码目录 server/data/.jwt-secret），该文件丢失/换机即全员登录态失效，且无法主动轮换。
+# 强烈建议显式注入环境变量（取消下一行注释并替换为你自己生成的强随机串，切勿提交到仓库）：
+# Environment=DADA_JWT_SECRET=<openssl rand -hex 32 生成的 64 位随机串，不要使用任何公开占位文本>
 
 # —— 稳定性 ——
 Restart=always

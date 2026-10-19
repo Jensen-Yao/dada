@@ -42,7 +42,12 @@ const imageUpload = multer({
   limits: { fileSize: 8 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     if (/^image\/(png|jpe?g|webp|gif)$/.test(file.mimetype)) cb(null, true);
-    else cb(new Error('仅支持图片文件'));
+    else {
+      // 自定义 filter 错误标记 400（S11）：否则落入全局 error handler 的 500 兜底
+      const e = new Error('仅支持图片文件');
+      e.status = 400;
+      cb(e);
+    }
   },
 });
 
@@ -210,6 +215,8 @@ postsRouter.put('/:id', requireAuth, (req, res) => {
     sets.push('status = ?'); vals.push(body.status);
     if (body.status === 'done') {
       completePost(p);
+      // R2-N7: 完成时剩余 pending 一并婉拒并通知（与满员同款，避免悬置）
+      rejectPendingJoins(p, '「' + p.title + '」已标记完成，申请自动关闭');
       trackEvent(req.user.id, 'done', p.id); // VD-01 漏斗：完成
     }
   }
@@ -337,12 +344,32 @@ postsRouter.post('/:id/joins/:joinId/approve', requireAuth, (req, res) => {
     getOrCreateConv(p.user_id, j.user_id, p.id);
     notify(j.user_id, 'join_result', '申请已通过', `你已加入「${p.title}」，快去和组局者聊聊吧`, { post_id: p.id });
     trackEvent(req.user.id, 'approve', p.id); // VD-01 漏斗：通过
-    if (approved + 1 >= p.need_count) db.prepare("UPDATE posts SET status = 'full' WHERE id = ?").run(p.id);
+    if (approved + 1 >= p.need_count) {
+      db.prepare("UPDATE posts SET status = 'full' WHERE id = ?").run(p.id);
+      // 满员后剩余 pending 申请自动婉拒并通知（用户批评R1 搭子王#3）：
+      // 此前第 N 名申请者会永远 pending、收不到任何结果通知，申请端"焦虑等待"无闭环。
+      const pendings = db.prepare("SELECT * FROM joins WHERE post_id = ? AND status = 'pending'").all(p.id);
+      const t = now();
+      for (const pj of pendings) {
+        db.prepare("UPDATE joins SET status = 'rejected', updated_at = ? WHERE id = ?").run(t, pj.id);
+        notify(pj.user_id, 'join_result', '申请未通过', `「${p.title}」该搭局已满员，未能通过你的申请，别灰心，广场上还有更多搭局`, { post_id: p.id });
+      }
+    }
   } else {
     notify(j.user_id, 'join_result', '申请未通过', `「${p.title}」的组局者未通过你的申请，别灰心，广场上还有更多搭局`, { post_id: p.id });
   }
   res.json(ok({ approved }));
 });
+
+// R2-N7: 组局结束（done）时婉拒剩余 pending（复用满员同款逻辑）
+function rejectPendingJoins(p, bodyText) {
+  const pendings = db.prepare("SELECT * FROM joins WHERE post_id = ? AND status = 'pending'").all(p.id);
+  const t = now();
+  for (const pj of pendings) {
+    db.prepare("UPDATE joins SET status = 'rejected', updated_at = ? WHERE id = ?").run(t, pj.id);
+    notify(pj.user_id, 'join_result', '申请未通过', `${bodyText}，别灰心，广场上还有更多搭局`, { post_id: p.id });
+  }
+}
 
 // ---------- 搭后互评（组局者与成员互评） ----------
 postsRouter.post('/:id/rate', requireAuth, (req, res) => {
