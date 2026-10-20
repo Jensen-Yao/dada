@@ -85,6 +85,16 @@ try {
 
 db.exec(USERS_TABLE_SQL.replace('%s', 'IF NOT EXISTS users'));
 
+// T7（R4状态机）：phone 部分唯一索引——同手机号防双注册从"纯依赖单进程串行性"升级为
+// 应用层 check + 数据库唯一索引双保险（pm2 cluster/多容器共享 SQLite 时仍守住底线）。
+// 部分索引（SQLite partial index）排除 NULL 与已注销账号：保留"注销释放手机号可复用"语义；
+// 唯一索引对多行 NULL 视为互不相同 → 未绑定手机号的存量用户不受影响。
+try {
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone ON users(phone) WHERE phone IS NOT NULL AND status != 'deleted'");
+} catch (e) {
+  console.error('[dada] idx_users_phone 创建失败（存量数据可能存在重复手机号，需人工清洗后重启）:', e.message);
+}
+
 db.exec(`
 CREATE TABLE IF NOT EXISTS posts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -225,6 +235,17 @@ CREATE TABLE IF NOT EXISTS partners (
   created_at INTEGER NOT NULL,
   PRIMARY KEY (user_a, user_b)
 );
+
+-- Ops-O5 意见反馈：设置页"意见反馈"入口（用户提交，admin 队列处理并留痕）
+CREATE TABLE IF NOT EXISTS feedback (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER REFERENCES users(id),
+  content TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','resolved')),
+  action_text TEXT DEFAULT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_feedback_status ON feedback(status, created_at);
 `);
 
 // R3-C7/L3 举报处理留痕：admin resolve 写入处理时间与动作，举报人经 /api/reports/mine 查询进度

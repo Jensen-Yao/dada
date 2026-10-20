@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db, now } from '../db.js';
-import { requireAuth, ok, filterContent, notify, anyBlocked, safeJSON } from '../util.js';
+import { requireAuth, ok, filterContentStrict, notify, anyBlocked, safeJSON } from '../util.js';
 // 循环依赖说明：index.js 导入本模块，本模块导入 index.js 的 notifyWS（函数声明具提升，
 // 且仅在请求处理器内调用），ESM 活绑定下安全。
 import { notifyWS } from '../index.js';
@@ -119,7 +119,16 @@ export function handleChatMessage(fromUser, convId, rawContent) {
   const content = String(rawContent || '').trim();
   if (!content) return { error: '消息不能为空' };
   if (content.length > 2000) return { error: '消息太长' };
-  const f = filterContent(content);
+  // G-聊天升级（R4灰产 G1-d/G3）：打码照发只遮"触发词"不遮"payload"（abc2026/123456 完好存活），
+  // 改为两级策略——
+  //   硬词（导流/违法/资金类：加微信/vx/转账/裸聊…）→ 直接【拒收】，不入库不投递
+  //     （index.js WS 收到 result.error 会回 chat_error 帧，现有错误路径复用）；
+  //   软词（涉黄暗语/收费话术等灰产信号）→ 维持打码放行。
+  // 匹配走归一化管道：零宽字符/全半角/空格分隔符变体（"加·V"、"威 信"）同样命中。
+  const f = filterContentStrict(content);
+  if (f.hardHits.length) {
+    return { error: '消息包含违规内容，已被拦截' };
+  }
   const msgContent = f.cleaned;
 
   const t = now();

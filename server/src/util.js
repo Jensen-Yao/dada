@@ -160,10 +160,17 @@ export const GENDER_REQS = { any: '不限', female: '仅限女生', male: '仅�
 export const RATE_TAGS = ['守时', '靠谱', '友善', '有趣', '聊得来', '再次约'];
 
 // ---------- 内容安全：敏感词过滤 ----------
-const SENSITIVE_WORDS = [
-  '加微信', '加v', '加V', '威信', '薇信', 'vx', 'VX', '加Q', '刷单', '兼职日结',
-  '博彩', '赌球', '贷款包过', '裸聊', '约炮', '一夜情', '嫖', '枪支', '毒品',
-  '转账', '汇款', '保证金', '解冻费', '投资稳赚', '内部渠道', '高回报',
+// R4灰产对抗（G1-d/G3）：词表拆两级——
+//   HARD：导流（加微信/vx/加Q）与违法欺诈（转账/裸聊/博彩…）类，聊天命中直接【拒收】；
+//   SOFT：涉黄暗语/收费话术等灰产信号，帖文申请仍拦截，聊天命中打码放行。
+export const SENSITIVE_HARD = [
+  '加微信', '加v', '威信', '薇信', 'vx', '加Q',
+  '转账', '汇款', '保证金', '解冻费', '投资稳赚', '贷款包过',
+  '刷单', '兼职日结', '博彩', '赌球',
+  '裸聊', '约炮', '一夜情', '嫖', '枪支', '毒品',
+];
+export const SENSITIVE_SOFT = [
+  '内部渠道', '高回报',
   // 涉黄暗语（据平台治理案例）
   '费用全包', '包食宿', '包吃住', '包机票', '全包价', '女生免费', '妹妹陪',
   // 涉黄暗语补充（搭子赛道专项治理：纯绿/半绿等暗语、线下有偿陪侍话术）
@@ -172,16 +179,95 @@ const SENSITIVE_WORDS = [
   '代订酒店', '代订机票', '内部票价', '优惠代充',
 ];
 
-export function filterContent(text) {
-  let hits = [];
-  let cleaned = String(text || '');
-  for (const w of SENSITIVE_WORDS) {
-    if (cleaned.toLowerCase().includes(w.toLowerCase())) {
-      hits.push(w);
-      cleaned = cleaned.split(w).join('*'.repeat(w.length));
+// R4灰产对抗（G1-a/G1-b）：匹配前归一化——封堵零宽字符 / 全半角 / 空格与分隔符拆字绕过。
+// 逐步符处理并保留原文字符位置映射（idxMap），命中后可回原文精确打码。
+const ZW_RE = /[\u200B-\u200D\uFEFF]/;
+const SEP_RE = /[\s.\-_*·・,，。]/;
+function foldChar(ch) {
+  const code = ch.charCodeAt(0);
+  // 全角 ASCII 区（！-～，含０-９ａ-ｚＡ-Ｚ）→ 半角
+  if (code >= 0xFF01 && code <= 0xFF5E) return String.fromCharCode(code - 0xFEE0);
+  return ch;
+}
+function normalizeForMatch(s) {
+  let out = '';
+  for (const raw of String(s || '')) {
+    const ch = foldChar(raw);
+    if (ZW_RE.test(ch) || SEP_RE.test(ch)) continue;
+    out += ch.toLowerCase();
+  }
+  return out;
+}
+function buildNormIndex(text) {
+  const chars = [...String(text || '')];
+  const normBuf = [];
+  const idxMap = [];
+  for (let i = 0; i < chars.length; i++) {
+    const ch = foldChar(chars[i]);
+    if (ZW_RE.test(ch) || SEP_RE.test(ch)) continue;
+    normBuf.push(ch.toLowerCase());
+    idxMap.push(i);
+  }
+  return { chars, norm: normBuf.join(''), idxMap };
+}
+
+// 归一化后的词表（去重，硬词优先；导出供测试核对拆分清单）
+export const SENSITIVE_NORM = (() => {
+  const seen = new Set();
+  const list = [];
+  for (const w of SENSITIVE_HARD) {
+    const word = normalizeForMatch(w);
+    if (!word || seen.has(word)) continue;
+    seen.add(word);
+    list.push({ word, hard: true });
+  }
+  for (const w of SENSITIVE_SOFT) {
+    const word = normalizeForMatch(w);
+    if (!word || seen.has(word)) continue;
+    seen.add(word);
+    list.push({ word, hard: false });
+  }
+  return list;
+})();
+
+function scanSensitive(text) {
+  const { chars, norm, idxMap } = buildNormIndex(text);
+  const hardHits = [];
+  const softHits = [];
+  const spans = [];
+  for (const { word, hard } of SENSITIVE_NORM) {
+    let from = 0;
+    for (;;) {
+      const i = norm.indexOf(word, from);
+      if (i === -1) break;
+      from = i + 1;
+      (hard ? hardHits : softHits).push(word);
+      spans.push([idxMap[i], idxMap[i + word.length - 1]]);
     }
   }
+  // 合并重叠区间后按原文位置打码（emoji 等未参与匹配的字符原样保留）
+  spans.sort((a, b) => a[0] - b[0] || b[1] - a[1]);
+  const merged = [];
+  for (const [s, e] of spans) {
+    const last = merged[merged.length - 1];
+    if (last && s <= last[1] + 1) last[1] = Math.max(last[1], e);
+    else merged.push([s, e]);
+  }
+  for (const [s, e] of merged) {
+    for (let i = s; i <= e; i++) chars[i] = '*';
+  }
+  return { cleaned: chars.join(''), hits: [...hardHits, ...softHits], hardHits, softHits };
+}
+
+// 签名兼容：帖文/评论/申请等"命中即拒"路径继续用 filterContent（hits 含硬+软）
+export function filterContent(text) {
+  const { cleaned, hits } = scanSensitive(text);
   return { cleaned, hits };
+}
+
+// R4（G1-d）：聊天通道专用——额外区分 hardHits（命中即拒收）与 softHits（打码放行）
+export function filterContentStrict(text) {
+  return scanSensitive(text);
 }
 
 // ---------- 通知 ----------

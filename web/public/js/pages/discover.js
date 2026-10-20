@@ -194,8 +194,8 @@ App.register('discover', async (el) => {
       doneBtn.disabled = true;
       try {
         await API.put('/users/me', { tags: [...picked], city: s.el.querySelector('#ob-city').value.trim() });
-        localStorage.removeItem('dada_need_onboard');
-        localStorage.setItem('dada_onboarded', '1');
+        safeStore.del('dada_need_onboard'); // R4-K3
+        safeStore.set('dada_onboarded', '1'); // R4-K3
         s.close();
         UI.toast('匹配已就绪');
         await Promise.all([loadFY(), loadHot()]); // 重新加载推荐（带新标签评分）
@@ -205,8 +205,8 @@ App.register('discover', async (el) => {
       }
     };
     s.el.querySelector('#ob-skip').onclick = () => {
-      localStorage.removeItem('dada_need_onboard');
-      localStorage.setItem('dada_onboarded', '1');
+      safeStore.del('dada_need_onboard'); // R4-K3
+      safeStore.set('dada_onboarded', '1'); // R4-K3
       s.close();
     };
   }
@@ -216,7 +216,7 @@ App.register('discover', async (el) => {
 
   async function maybeOnboard() {
     if (!API.isLogin()) return;
-    if (localStorage.getItem('dada_need_onboard') !== '1' || localStorage.getItem('dada_onboarded')) return;
+    if (safeStore.get('dada_need_onboard') !== '1' || safeStore.get('dada_onboarded')) return;
     if (document.querySelector('.ob-sheet')) return; // 已有引导 sheet 在弹，不重复
     let city = '';
     try { city = (await API.get('/auth/me')).city || ''; } catch { /* ignore */ }

@@ -4,9 +4,13 @@ App.register('chat', async (el) => {
   // P1-5 红线：视口判定必须走 matchMedia，禁止直接读 window.innerWidth。
   const desktop = matchMedia('(min-width:768px)').matches;
   // 断点跨越时整页刷新，保证分栏/单栏结构与视口一致（一次性注册守卫）
+  // R4-K5：Safari <14 的 MediaQueryList 无 addEventListener，降级用 addListener
   if (!window.__mqBound) {
     window.__mqBound = true;
-    matchMedia('(min-width:768px)').addEventListener('change', () => location.reload());
+    const mq = matchMedia('(min-width:768px)');
+    const onMqChange = () => location.reload();
+    if (mq.addEventListener) mq.addEventListener('change', onMqChange);
+    else if (mq.addListener) mq.addListener(onMqChange);
   }
 
   if (desktop) {

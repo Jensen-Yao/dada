@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { db, now } from '../db.js';
-import { signToken, requireAuth, ok, publicUser, safeJSON, trackEvent } from '../util.js';
+import { signToken, requireAuth, ok, publicUser, safeJSON, trackEvent, filterContent } from '../util.js';
 
 export const authRouter = Router();
 
@@ -116,6 +116,11 @@ authRouter.post('/register', (req, res) => {
     if (nick.length < 1 || nick.length > 20) {
       return res.status(400).json({ error: '昵称需为 1-20 个字符' });
     }
+    // G-后门2（R4灰产）：昵称是全站曝光度最高的资料字段（广场每帖作者名），必须过敏感词管道
+    const fNick = filterContent(nick);
+    if (fNick.hits.length) {
+      return res.status(400).json({ error: '昵称包含违规信息，请修改' });
+    }
     // 用户批评R1（Amy#1/老王#2，P0）：注册表单收集的 gender/city 此前被硬编码丢弃
     // （gender='secret', city=''）→ 女性用户永远进不了女生局、发布页城市永不预填。现入库。
     const gender = ['male', 'female', 'secret'].includes(body.gender) ? body.gender : 'secret';
@@ -123,10 +128,20 @@ authRouter.post('/register', (req, res) => {
     const username = genUsernameByPhone(phone);
     const hash = bcrypt.hashSync(String(password), 10);
     const t = now();
-    const info = db.prepare(`
-      INSERT INTO users (username, password_hash, nickname, gender, birth_year, city, tags, phone, adult_confirmed, created_at, last_active_at)
-      VALUES (?,?,?,?,NULL,?,'[]',?,1,?,?)
-    `).run(username, hash, nick, gender, city, phone, t, t);
+    let info;
+    try {
+      info = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, gender, birth_year, city, tags, phone, adult_confirmed, created_at, last_active_at)
+        VALUES (?,?,?,?,NULL,?,'[]',?,1,?,?)
+      `).run(username, hash, fNick.cleaned, gender, city, phone, t, t);
+    } catch (e) {
+      // T7（R4状态机）：idx_users_phone 唯一索引兜底——多进程部署下应用层 check 之外，
+      // 数据库约束是最后防线；冲突映射为 409（语义与上方 check 一致）
+      if (String(e.message).includes('UNIQUE')) {
+        return res.status(409).json({ error: '该手机号已注册' });
+      }
+      throw e;
+    }
     smsCodes.delete(phone); // 验证码一次性使用
     const user = findUser(info.lastInsertRowid);
     trackEvent(user.id, 'register'); // VD-01 漏斗：注册
@@ -134,6 +149,12 @@ authRouter.post('/register', (req, res) => {
   }
 
   // ---------- 用户名注册模式（存量测试兼容保留） ----------
+  // G-后门1（R4灰产）：用户名注册是无手机号、无验证码的零成本账号后门——
+  // 灰产借它完全绕开 sms 10/IP/h 与 login 限流矩阵。生产环境设 DADA_USERNAME_REG=0 关闭；
+  // 默认开放仅用于本地演示与测试构建。
+  if (process.env.DADA_USERNAME_REG === '0') {
+    return res.status(403).json({ error: '注册已改为手机号方式' });
+  }
   const { username, password, nickname, gender, birth_year, city } = body;
   if (!username || !/^[a-zA-Z0-9_]{3,20}$/.test(username)) {
     return res.status(400).json({ error: '用户名需为 3-20 位字母、数字或下划线' });
@@ -144,6 +165,11 @@ authRouter.post('/register', (req, res) => {
   if (!nickname || String(nickname).trim().length < 1 || String(nickname).length > 20) {
     return res.status(400).json({ error: '昵称需为 1-20 个字符' });
   }
+  // G-后门2（R4灰产）：昵称过敏感词管道（归一化匹配：零宽/全半角/分隔符变体同样命中）
+  const fNick2 = filterContent(String(nickname).trim());
+  if (fNick2.hits.length) {
+    return res.status(400).json({ error: '昵称包含违规信息，请修改' });
+  }
   if (db.prepare('SELECT 1 FROM users WHERE username = ?').get(username)) {
     return res.status(409).json({ error: '用户名已被注册' });
   }
@@ -152,7 +178,7 @@ authRouter.post('/register', (req, res) => {
   const info = db.prepare(`
     INSERT INTO users (username, password_hash, nickname, gender, birth_year, city, tags, created_at, last_active_at)
     VALUES (?,?,?,?,?,?,?,?,?)
-  `).run(username, hash, String(nickname).trim(), ['male', 'female', 'secret'].includes(gender) ? gender : 'secret',
+  `).run(username, hash, fNick2.cleaned, ['male', 'female', 'secret'].includes(gender) ? gender : 'secret',
     birth_year ? parseInt(birth_year) : null, String(city || '').trim().slice(0, 60), '[]', t, t);
   const user = findUser(info.lastInsertRowid);
   trackEvent(user.id, 'register'); // VD-01 漏斗：注册（用户名模式）

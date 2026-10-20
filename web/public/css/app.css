@@ -59,7 +59,9 @@ input, textarea, select { font-family: inherit; font-size: inherit; outline: non
 img { display: block; max-width: 100%; }
 .hidden { display: none !important; }
 
-#app { height: 100dvh; display: flex; flex-direction: column; position: relative; }
+/* R4-K2：dvh 回退——先声明 100vh（旧内核无法识别 dvh 时回退到它），紧跟 100dvh（新内核优先取后者，规避移动端地址栏抖动） */
+#app { height: 100vh; display: flex; flex-direction: column; position: relative; }
+#app { height: 100dvh; }
 #page-container { flex: 1; overflow: hidden; position: relative; }
 .page {
   position: absolute; inset: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;

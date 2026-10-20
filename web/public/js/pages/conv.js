@@ -5,9 +5,13 @@ App.register('conv', async (el, seg) => {
   // P1-5 红线：视口判定必须走 matchMedia，禁止直接读 window.innerWidth。
   const desktop = matchMedia('(min-width:768px)').matches;
   // 断点跨越时整页刷新，保证分栏/单栏结构与视口一致（一次性注册守卫）
+  // R4-K5：Safari <14 的 MediaQueryList 未继承 EventTarget，无 addEventListener，降级用 addListener
   if (!window.__mqBound) {
     window.__mqBound = true;
-    matchMedia('(min-width:768px)').addEventListener('change', () => location.reload());
+    const mq = matchMedia('(min-width:768px)');
+    const onMqChange = () => location.reload();
+    if (mq.addEventListener) mq.addEventListener('change', onMqChange);
+    else if (mq.addListener) mq.addListener(onMqChange);
   }
   let currentConvId = parseInt(seg[0], 10);
   // H9：convId 非法（#/conv/abc → NaN）不再渲染"半残可用"聊天室
@@ -303,7 +307,12 @@ App.register('conv', async (el, seg) => {
   }
 
   el.querySelector('#btn-send').onclick = send;
-  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+  // R4-K4：中文输入法组合期按 Enter 确认候选词时 key==='Enter' 且 isComposing===true
+  // （旧内核 isComposing 缺失时 keyCode 为 229），此时不发送，避免拼音原样发出
+  input.addEventListener('keydown', (e) => {
+    if (e.isComposing || e.keyCode === 229) return;
+    if (e.key === 'Enter') send();
+  });
 
   // 接收实时消息
   // H1：改用页级 App.onCleanup 卸载（DOMNodeRemoved 在 Chrome 对 innerHTML 替换不派发，

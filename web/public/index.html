@@ -2,6 +2,25 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
+  <!-- R4-K1(A轻量)：体检脚本——全 ES5 内联、head 最前同步执行。
+       后续 15 个业务脚本含 ES2020+ 语法（?. / ??），旧内核解析即 SyntaxError → 整站白屏；
+       此脚本探测命中（基础 API 过老，或 new Function 探测 ?. 语法失败）时
+       document.write 一段全屏降级提示，把"无声白屏"变成一句人话。 -->
+  <script>
+  (function () {
+    var tooOld = false;
+    try {
+      tooOld = (typeof Symbol === 'undefined')
+        || !String.prototype.includes
+        || (function () { try { new Function('var o={};return o?.a'); } catch (e) { return true; } return false; })();
+    } catch (e) { tooOld = true; }
+    if (!tooOld) return;
+    document.write('<div style="position:fixed;top:0;left:0;right:0;bottom:0;z-index:99999;background:#F6F7F9;'
+      + 'display:flex;align-items:center;justify-content:center;text-align:center;padding:32px;'
+      + 'font-size:16px;color:#666;line-height:1.9;font-family:sans-serif;">'
+      + '<div>浏览器版本过低，请更新后访问<br><span style="font-size:13px;color:#999;">或更换系统浏览器 / 将微信更新至最新版本</span></div></div>');
+  })();
+  </script>
   <!-- U7：放开缩放（原 user-scalable=no 违反 WCAG 1.4.4）；Capacitor 壳内 WebView 可另行禁缩放，互不影响 -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover">
   <!-- 老王P0：大字模式（设置页开关写 localStorage dada_bigfont），首帧前挂 html[data-bigfont] 避免闪变 -->
@@ -41,6 +60,7 @@
       </button>
     </nav>
   </div>
+  <script src="/js/storage.js"></script>
   <script src="/js/api.js"></script>
   <script src="/js/ui.js"></script>
   <script src="/js/ws.js"></script>

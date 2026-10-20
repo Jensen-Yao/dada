@@ -153,9 +153,9 @@ test('私信门槛与聊天流程', async () => {
   const userB = db.prepare('SELECT * FROM users WHERE id = ?').get(userIdB);
   const r1 = handleChatMessage(userB, convId, '你好呀，周五见！');
   assert.ok(!r1.error, 'should send ok: ' + (r1.error || ''));
-  const r2 = handleChatMessage(userB, convId, '我的加微信是 xxx');
+  const r2 = handleChatMessage(userB, convId, '这次费用全包我来安排');
   assert.ok(!r2.error);
-  // 敏感词被替换为 *
+  // 软词（涉黄暗语等灰产信号）被替换为 *（R4 聊天升级：硬词改为直接拒收，见文末 R4 段）
   const msgs = await api('GET', `/api/chat/conv/${convId}/messages`, null, tokenB);
   assert.equal(msgs.status, 200);
   const replaced = msgs.json.data.messages.find((m) => m.content.includes('***'));
@@ -1772,6 +1772,357 @@ test('登录限流：每IP 15分钟20次，超出429"尝试过于频繁"（S8）
   // 窗口期内继续请求仍被限流
   const r2 = await api('POST', '/api/auth/login', { username: 'bruteforce_probe', password: 'x' });
   assert.equal(r2.status, 429);
+});
+
+// ==================================================================
+// R4 批评修复回归（状态机 review-state-r4 + 灰产对抗 review-gray-r4）：
+// T3 done幂等+零成员不加分 / T4 approve帖子状态守卫 / T5 账号状态复查 /
+// T2 quit退出通道 / T7 phone部分唯一索引 / G1 用户名注册开关 /
+// G2 资料字段归一化过滤 / G3 聊天硬词拒收 / Ops-O5 意见反馈
+// ==================================================================
+
+test('R4-T3 done幂等：重复标记完成400且不重复加分/不重复通知', async () => {
+  const { db } = await import('../src/db.js');
+  const created = await api('POST', '/api/posts', {
+    category: 'food', title: 'R4幂等完成局', content: 'x', city: '北京', need_count: 1,
+  }, tokenA);
+  assert.equal(created.status, 200);
+  const pid = created.json.data.id;
+  await api('POST', `/api/posts/${pid}/join`, { message: '带我一个' }, tokenB);
+  const jlist = await api('GET', `/api/posts/${pid}/joins`, null, tokenA);
+  await api('POST', `/api/posts/${pid}/joins/${jlist.json.data[0].id}/approve`, { approve: true }, tokenA);
+  const creditOf = (id) => db.prepare('SELECT credit FROM users WHERE id = ?').get(id).credit;
+  const a0 = creditOf(userIdA), b0 = creditOf(userIdB);
+  // 第 1 次 done：正常完成，双方各 +20
+  const d1 = await api('PUT', `/api/posts/${pid}`, { status: 'done' }, tokenA);
+  assert.equal(d1.status, 200);
+  assert.equal(d1.json.data.status, 'done');
+  assert.equal(creditOf(userIdA), a0 + 20, 'author +20 once');
+  assert.equal(creditOf(userIdB), b0 + 20, 'member +20 once');
+  // 第 2 次 done（双击/网络重试）：400 幂等护栏，分值与通知都不再变动
+  const d2 = await api('PUT', `/api/posts/${pid}`, { status: 'done' }, tokenA);
+  assert.equal(d2.status, 400);
+  assert.equal(d2.json.error, '该搭局已完成');
+  assert.equal(creditOf(userIdA), a0 + 20, 'no double credit for author');
+  assert.equal(creditOf(userIdB), b0 + 20, 'no double credit for member');
+  const bNotifs = await api('GET', '/api/notifications', null, tokenB);
+  const doneNotifs = bNotifs.json.data.filter((n) => n.type === 'post_done' && n.data && n.data.post_id === pid);
+  assert.equal(doneNotifs.length, 1, 'exactly one post_done notification');
+  // done 后重开再完成也拒不掉（防 done→open→done 循环刷分）
+  const reopen = await api('PUT', `/api/posts/${pid}`, { status: 'open' }, tokenA);
+  assert.equal(reopen.status, 400);
+});
+
+test('R4-T3 零成员open局直接done：状态流转但作者不加分', async () => {
+  const { db } = await import('../src/db.js');
+  const created = await api('POST', '/api/posts', {
+    category: 'coffee', title: 'R4零成员完成局', content: 'x', city: '北京', need_count: 1,
+  }, tokenA);
+  assert.equal(created.status, 200);
+  const pid = created.json.data.id;
+  const creditOf = (id) => db.prepare('SELECT credit FROM users WHERE id = ?').get(id).credit;
+  const a0 = creditOf(userIdA);
+  const d = await api('PUT', `/api/posts/${pid}`, { status: 'done' }, tokenA);
+  assert.equal(d.status, 200, '0-member post can still be marked done');
+  assert.equal(d.json.data.status, 'done');
+  assert.equal(d.json.data.approved_count, 0);
+  assert.equal(creditOf(userIdA), a0, 'author must NOT gain credit without any approved member');
+});
+
+test('R4-T4 approve帖子状态守卫：expired局不复活、不可批准', async () => {
+  const { db } = await import('../src/db.js');
+  const { runJobs } = await import('../src/jobs.js');
+  const created = await api('POST', '/api/posts', {
+    category: 'study', title: 'R4过期审批守卫局', content: 'x', city: '北京', need_count: 1,
+  }, tokenA);
+  assert.equal(created.status, 200);
+  const pid = created.json.data.id;
+  await api('POST', `/api/posts/${pid}/join`, { message: '过期前申请' }, tokenB);
+  // 走真实 jobs 路径置 expired（created_at 回拨 15 天）
+  db.prepare('UPDATE posts SET created_at = ? WHERE id = ?').run(Date.now() - 15 * 86400000, pid);
+  assert.equal(runJobs().expired >= 1, true, 'post expired by job');
+  const jlist = await api('GET', `/api/posts/${pid}/joins`, null, tokenA);
+  const joinId = jlist.json.data[0].id;
+  const ap = await api('POST', `/api/posts/${pid}/joins/${joinId}/approve`, { approve: true }, tokenA);
+  assert.equal(ap.status, 400);
+  assert.equal(ap.json.error, '该搭局已过期或结束');
+  // expired 不被"复活"为 full；申请保持 pending 未被批准
+  const detail = await api('GET', `/api/posts/${pid}`);
+  assert.equal(detail.json.data.status, 'expired', 'expired post must not be revived to full');
+  assert.equal(detail.json.data.my_join === undefined || detail.json.data.my_join !== 'approved', true);
+  const joins2 = await api('GET', `/api/posts/${pid}/joins`, null, tokenA);
+  assert.equal(joins2.json.data[0].status, 'pending');
+});
+
+test('R4-T5 approve账号复查：已注销申请人的join自动拒绝并说明', async () => {
+  const reg = await api('POST', '/api/auth/register', {
+    username: 'r4_gone_user', password: '123456', nickname: '将注销申请人', gender: 'male', city: '北京',
+  });
+  assert.equal(reg.status, 200);
+  const tokenG = reg.json.data.token, userIdG = reg.json.data.user.id;
+  const created = await api('POST', '/api/posts', {
+    category: 'game', title: 'R4注销复查局', content: 'x', city: '北京', need_count: 1,
+  }, tokenA);
+  const pid = created.json.data.id;
+  await api('POST', `/api/posts/${pid}/join`, { message: '我还在' }, tokenG);
+  // 申请人注销（与 approve 的时序无关：顺序执行同样必须拦截）
+  const del = await api('POST', '/api/users/me/delete', { confirm: 'DELETE' }, tokenG);
+  assert.equal(del.status, 200);
+  const jlist = await api('GET', `/api/posts/${pid}/joins`, null, tokenA);
+  const joinId = jlist.json.data.find((x) => x.user.id === userIdG).id;
+  const ap = await api('POST', `/api/posts/${pid}/joins/${joinId}/approve`, { approve: true }, tokenA);
+  assert.equal(ap.status, 400);
+  assert.ok(ap.json.error.includes('注销'), 'error explains the account is gone: ' + ap.json.error);
+  // 该 join 被置 rejected（不悬置、不占名额）
+  const joins2 = await api('GET', `/api/posts/${pid}/joins`, null, tokenA);
+  assert.equal(joins2.json.data.find((x) => x.user.id === userIdG).status, 'rejected');
+  const detail = await api('GET', `/api/posts/${pid}`);
+  assert.equal(detail.json.data.status, 'open', 'post stays open (deleted applicant did not take a slot)');
+});
+
+test('R4-T5 done账号复查：已注销成员跳过加分与通知，其余照常', async () => {
+  const { db } = await import('../src/db.js');
+  const reg = await api('POST', '/api/auth/register', {
+    username: 'r4_gone_member', password: '123456', nickname: '将注销成员', gender: 'male', city: '北京',
+  });
+  assert.equal(reg.status, 200);
+  const tokenM = reg.json.data.token, userIdM = reg.json.data.user.id;
+  const created = await api('POST', '/api/posts', {
+    category: 'sports', title: 'R4注销成员完成局', content: 'x', city: '北京', need_count: 1,
+  }, tokenA);
+  const pid = created.json.data.id;
+  await api('POST', `/api/posts/${pid}/join`, { message: '先通过再注销' }, tokenM);
+  const jlist = await api('GET', `/api/posts/${pid}/joins`, null, tokenA);
+  await api('POST', `/api/posts/${pid}/joins/${jlist.json.data[0].id}/approve`, { approve: true }, tokenA);
+  // 通过后注销，再标记完成
+  await api('POST', '/api/users/me/delete', { confirm: 'DELETE' }, tokenM);
+  const creditOf = (id) => db.prepare('SELECT credit FROM users WHERE id = ?').get(id).credit;
+  const a0 = creditOf(userIdA), m0 = creditOf(userIdM);
+  const notifCount = () => db.prepare('SELECT COUNT(*) c FROM notifications WHERE user_id = ?').get(userIdM).c;
+  const notifBefore = notifCount();
+  const d = await api('PUT', `/api/posts/${pid}`, { status: 'done' }, tokenA);
+  assert.equal(d.status, 200);
+  assert.equal(creditOf(userIdM), m0, 'deleted member must NOT gain credit');
+  assert.equal(creditOf(userIdA), a0 + 20, 'active author still +20');
+  assert.equal(notifCount(), notifBefore, 'deleted member receives no notification from done');
+});
+
+test('R4-T2 quit退出通道：pending/rejected可退出+通知组局者+不回流', async () => {
+  // -- 场景1：pending 退出
+  const p1 = await api('POST', '/api/posts', {
+    category: 'movie', title: 'R4退出通道局', content: 'x', city: '北京', need_count: 2,
+  }, tokenA);
+  assert.equal(p1.status, 200);
+  const pid1 = p1.json.data.id;
+  await api('POST', `/api/posts/${pid1}/join`, { message: 'C申请' }, tokenC);
+  const q1 = await api('POST', `/api/posts/${pid1}/quit`, {}, tokenC);
+  assert.equal(q1.status, 200);
+  assert.equal(q1.json.data.quit, true);
+  const j1 = await api('GET', `/api/posts/${pid1}/joins`, null, tokenA);
+  assert.equal(j1.json.data.find((x) => x.user.id === userIdC).status, 'quit');
+  // 组局者收到"退出"通知
+  const aNotifs = await api('GET', '/api/notifications', null, tokenA);
+  const quitNotif = aNotifs.json.data.find((n) => n.type === 'join_quit' && n.data && n.data.post_id === pid1);
+  assert.ok(quitNotif, 'author notified of quit');
+  assert.ok(quitNotif.body.includes('退出'), 'quit notification mentions exit: ' + quitNotif.body);
+  // 重复退出 → 400
+  const q2 = await api('POST', `/api/posts/${pid1}/quit`, {}, tokenC);
+  assert.equal(q2.status, 400);
+  assert.equal(q2.json.error, '已退出过该搭局');
+  // 退出后可重新申请（退出不是单行道）
+  const reJoin = await api('POST', `/api/posts/${pid1}/join`, { message: '改主意了' }, tokenC);
+  assert.equal(reJoin.status, 200);
+  const j2 = await api('GET', `/api/posts/${pid1}/joins`, null, tokenA);
+  assert.equal(j2.json.data.find((x) => x.user.id === userIdC).status, 'pending');
+  // approved 成员不可退出（已占名额）
+  const jlist = await api('GET', `/api/posts/${pid1}/joins`, null, tokenA);
+  const joinC = jlist.json.data.find((x) => x.user.id === userIdC);
+  await api('POST', `/api/posts/${pid1}/joins/${joinC.id}/approve`, { approve: true }, tokenA);
+  const q3 = await api('POST', `/api/posts/${pid1}/quit`, {}, tokenC);
+  assert.equal(q3.status, 400);
+  assert.equal(q3.json.error, '申请已通过，无法退出');
+
+  // -- 场景2：rejected 退出后，满员扩容回流不捞 quit 行
+  const p2 = await api('POST', '/api/posts', {
+    category: 'food', title: 'R4退出不回流局', content: 'x', city: '北京', need_count: 1,
+  }, tokenA);
+  const pid2 = p2.json.data.id;
+  await api('POST', `/api/posts/${pid2}/join`, { message: 'C再来' }, tokenC);
+  await api('POST', `/api/posts/${pid2}/join`, { message: 'D也来' }, tokenD);
+  const jl = await api('GET', `/api/posts/${pid2}/joins`, null, tokenA);
+  const joinC2 = jl.json.data.find((x) => x.user.id === userIdC);
+  await api('POST', `/api/posts/${pid2}/joins/${joinC2.id}/approve`, { approve: true }, tokenA); // 满员，D 被自动婉拒
+  const q4 = await api('POST', `/api/posts/${pid2}/quit`, {}, tokenD); // rejected → quit
+  assert.equal(q4.status, 200);
+  // 扩容：rejected 回流 pending，quit 不回流
+  const exp = await api('PUT', `/api/posts/${pid2}`, { need_count: 2 }, tokenA);
+  assert.equal(exp.status, 200);
+  assert.equal(exp.json.data.status, 'open');
+  const jl2 = await api('GET', `/api/posts/${pid2}/joins`, null, tokenA);
+  const dJoin = jl2.json.data.find((x) => x.user.id === userIdD);
+  assert.equal(dJoin.status, 'quit', 'quit row must NOT flow back on expansion');
+  // D 没有收到"扩容回流"通知
+  const dNotifs = await api('GET', '/api/notifications', null, tokenD);
+  const backflow = dNotifs.json.data.find((n) => n.type === 'join_result' && n.data && n.data.post_id === pid2 && n.title.includes('扩容'));
+  assert.equal(backflow, undefined, 'no expansion reflow notification for quit user');
+  // 从未申请过的人 quit → 404
+  const q5 = await api('POST', `/api/posts/${pid1}/quit`, {}, tokenE);
+  assert.equal(q5.status, 404);
+});
+
+test('R4-T7 phone部分唯一索引：active同号双插抛UNIQUE，deleted释放、NULL不受限', async () => {
+  const { db } = await import('../src/db.js');
+  const t = Date.now();
+  const ins = (username, phone, status) => db.prepare(`
+    INSERT INTO users (username, password_hash, nickname, gender, tags, phone, status, created_at, last_active_at)
+    VALUES (?,?,?,?, '[]', ?, ?, ?, ?)
+  `).run(username, 'x', '索引测试', 'secret', phone, status, t, t);
+  ins('r4_ph_a', '13877770001', 'active');
+  // 同号第二个 active 用户 → 唯一索引拒绝（多进程部署下应用层 check 失守时的最后防线）
+  assert.throws(() => ins('r4_ph_b', '13877770001', 'active'), /UNIQUE/, 'duplicate active phone must violate unique index');
+  // 注销态不占号（保留"注销释放手机号"语义）
+  ins('r4_ph_c', '13877770001', 'deleted');
+  // 未绑手机号（NULL）可多行
+  ins('r4_ph_d', null, 'active');
+  ins('r4_ph_e', null, 'active');
+});
+
+test('R4-G1 用户名注册开关：DADA_USERNAME_REG=0 时 403，恢复后可用', async () => {
+  // 关闭（生产姿态）：用户名模式一律 403
+  process.env.DADA_USERNAME_REG = '0';
+  try {
+    const r = await api('POST', '/api/auth/register', { username: 'r4_closed', password: '123456', nickname: '被关门' });
+    assert.equal(r.status, 403);
+    assert.equal(r.json.error, '注册已改为手机号方式');
+  } finally {
+    delete process.env.DADA_USERNAME_REG; // 恢复演示开放（默认）
+  }
+  // 恢复后用户名注册可用（存量测试兼容路径仍在）
+  const r2 = await api('POST', '/api/auth/register', { username: 'r4_open', password: '123456', nickname: '恢复开放' });
+  assert.equal(r2.status, 200);
+  assert.ok(r2.json.data.token);
+});
+
+test('R4-G2 资料字段过滤：bio/nickname/occupation/school/tags 过归一化敏感词管道', async () => {
+  // bio：词表原文
+  const r1 = await api('PUT', '/api/users/me', { bio: '加V看我主页' }, tokenE);
+  assert.equal(r1.status, 400);
+  // bio：分隔符绕过变体（加·V）——归一化后同样命中
+  const r2 = await api('PUT', '/api/users/me', { bio: '加·V看主页' }, tokenE);
+  assert.equal(r2.status, 400);
+  // bio：空格拆字（威 信）
+  const r3 = await api('PUT', '/api/users/me', { bio: '威 信 找我' }, tokenE);
+  assert.equal(r3.status, 400);
+  // bio：全角变体（ｖｘ：ａｂｃ）
+  const r4 = await api('PUT', '/api/users/me', { bio: 'ｖｘ：ａｂｃ2026' }, tokenE);
+  assert.equal(r4.status, 400);
+  // nickname / occupation / school 同管道
+  const r5 = await api('PUT', '/api/users/me', { nickname: '加V客服' }, tokenE);
+  assert.equal(r5.status, 400);
+  const r6 = await api('PUT', '/api/users/me', { occupation: '加V看主页' }, tokenE);
+  assert.equal(r6.status, 400);
+  const r7 = await api('PUT', '/api/users/me', { school: 'vx:abc2026中学' }, tokenE);
+  assert.equal(r7.status, 400);
+  // tags 逐个过滤
+  const r8 = await api('PUT', '/api/users/me', { tags: ['徒步', 'vx'] }, tokenE);
+  assert.equal(r8.status, 400);
+  // 正常值放行（无副作用）
+  const ok1 = await api('PUT', '/api/users/me', { bio: '喜欢爬山看日出', tags: ['徒步', '摄影'] }, tokenE);
+  assert.equal(ok1.status, 200);
+  assert.equal(ok1.json.data.bio, '喜欢爬山看日出');
+  // 学生认证 school 同守卫（曾成"+30分认证广告牌"）
+  const reg = await api('POST', '/api/auth/register', { username: 'r4_student', password: '123456', nickname: '认证过滤' });
+  assert.equal(reg.status, 200);
+  const v1 = await api('POST', '/api/users/me/verify', { type: 'student', school: 'vx:abc2026中学' }, reg.json.data.token);
+  assert.equal(v1.status, 400);
+  assert.ok(v1.json.error.includes('学校'), 'verify school error mentions school: ' + v1.json.error);
+  const v2 = await api('POST', '/api/users/me/verify', { type: 'student', school: '北京邮电大学' }, reg.json.data.token);
+  assert.equal(v2.status, 200);
+});
+
+test('R4-G2 帖子location_name过滤：引流变体400，正常地点入库', async () => {
+  const bad = await api('POST', '/api/posts', {
+    category: 'travel', title: 'R4地点过滤局', content: 'x', city: '杭州', location_name: '西湖边上 vx:abc2026',
+  }, tokenA);
+  assert.equal(bad.status, 400);
+  const good = await api('POST', '/api/posts', {
+    category: 'travel', title: 'R4地点正常局', content: 'x', city: '杭州', location_name: '西湖断桥',
+  }, tokenA);
+  assert.equal(good.status, 200);
+  assert.equal(good.json.data.location_name, '西湖断桥');
+});
+
+test('R4-G3 聊天硬词拒收+软词打码：变体同样命中硬词', async () => {
+  const { handleChatMessage } = await import('../src/routes/chat.js');
+  const { db } = await import('../src/db.js');
+  const convs = await api('GET', '/api/chat/convs', null, tokenA);
+  const convAB = convs.json.data.find((c) => c.other && c.other.id === userIdB);
+  assert.ok(convAB, 'A↔B 会话存在');
+  const count = () => db.prepare('SELECT COUNT(*) c FROM messages WHERE conv_id = ?').get(convAB.id).c;
+  const before = count();
+  // 硬词（导流/资金类）→ 拒收，不入库
+  const r1 = handleChatMessage(db.prepare('SELECT * FROM users WHERE id = ?').get(userIdA), convAB.id, '加微信吧 abc12345');
+  assert.equal(r1.error, '消息包含违规内容，已被拦截');
+  // 硬词变体：分隔符绕过（加·V）归一化后命中 → 同样拒收
+  const r2 = handleChatMessage(db.prepare('SELECT * FROM users WHERE id = ?').get(userIdA), convAB.id, '加·V：abc12345');
+  assert.equal(r2.error, '消息包含违规内容，已被拦截');
+  // 硬词变体：转账（资金诈骗类）→ 拒收
+  const r3 = handleChatMessage(db.prepare('SELECT * FROM users WHERE id = ?').get(userIdA), convAB.id, '先转保证金再进群');
+  assert.equal(r3.error, '消息包含违规内容，已被拦截');
+  assert.equal(count(), before, 'rejected messages must not be stored');
+  // 软词（涉黄暗语等灰产信号）→ 打码放行
+  const userA = db.prepare('SELECT * FROM users WHERE id = ?').get(userIdA);
+  const r4 = handleChatMessage(userA, convAB.id, '我们纯绿徒步，费用全包也没事');
+  assert.ok(!r4.error, 'soft word passes masked: ' + (r4.error || ''));
+  assert.deepEqual([...r4.blocked_words].sort(), ['纯绿', '费用全包'].sort(), 'soft hits reported (order follows wordlist scan)');
+  assert.ok(r4.message.content.includes('*'), 'soft word masked');
+  assert.equal(r4.message.content, '我们**徒步，****也没事');
+  assert.equal(count(), before + 1, 'masked message stored exactly once');
+});
+
+test('R4-O5 意见反馈：提交/校验/admin列表/处理留痕/通知', async () => {
+  // 长度校验
+  const short = await api('POST', '/api/feedback', { content: '太短' }, tokenE);
+  assert.equal(short.status, 400);
+  assert.equal(short.json.error, '反馈内容需为 5-500 字');
+  const long = await api('POST', '/api/feedback', { content: '好'.repeat(501) }, tokenE);
+  assert.equal(long.status, 400);
+  // 违规内容拦截
+  const dirty = await api('POST', '/api/feedback', { content: '这个app不行，我要加V去别家' }, tokenE);
+  assert.equal(dirty.status, 400);
+  // 正常提交
+  const sub = await api('POST', '/api/feedback', { content: '希望增加批量取消申请的功能，谢谢' }, tokenE);
+  assert.equal(sub.status, 200);
+  assert.equal(sub.json.data.submitted, true);
+  // 非管理员不可见队列
+  const forbidden = await api('GET', '/api/admin/feedback', null, tokenE);
+  assert.equal(forbidden.status, 403);
+  // admin 队列可见（含提交人昵称）
+  const list = await api('GET', '/api/admin/feedback', null, tokenAdmin);
+  assert.equal(list.status, 200);
+  const mine = list.json.data.find((f) => f.content === '希望增加批量取消申请的功能，谢谢');
+  assert.ok(mine, 'submitted feedback visible in admin queue');
+  assert.equal(mine.status, 'open');
+  assert.equal(mine.user_nickname !== undefined, true, 'queue rows carry submitter nickname');
+  // resolve 必须带处理说明
+  const noText = await api('POST', `/api/admin/feedback/${mine.id}/resolve`, {}, tokenAdmin);
+  assert.equal(noText.status, 400);
+  // resolve 成功 → 状态与处理说明留痕
+  const res1 = await api('POST', `/api/admin/feedback/${mine.id}/resolve`, { action_text: '已收到，规划中' }, tokenAdmin);
+  assert.equal(res1.status, 200);
+  const resolvedList = await api('GET', '/api/admin/feedback?status=resolved', null, tokenAdmin);
+  const done = resolvedList.json.data.find((f) => f.id === mine.id);
+  assert.ok(done, 'resolved feedback in resolved queue');
+  assert.equal(done.action_text, '已收到，规划中');
+  // 重复 resolve → 400
+  const res2 = await api('POST', `/api/admin/feedback/${mine.id}/resolve`, { action_text: '再处理一次' }, tokenAdmin);
+  assert.equal(res2.status, 400);
+  assert.equal(res2.json.error, '该反馈已处理');
+  // 提交人收到处理结果通知
+  const eNotifs = await api('GET', '/api/notifications', null, tokenE);
+  const fbNotif = eNotifs.json.data.find((n) => n.type === 'feedback_result' && n.data && n.data.feedback_id === mine.id);
+  assert.ok(fbNotif, 'submitter notified of resolution');
+  assert.ok(fbNotif.body.includes('已收到，规划中'));
 });
 
 console.log('\n✅ 全部 API 测试通过');

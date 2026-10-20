@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db, now } from '../db.js';
-import { requireAuth, optionalAuth, ok, safeJSON, CATEGORIES, CATEGORY_MAP, FEE_MODES, GENDER_REQS, RATE_TAGS } from '../util.js';
+import { requireAuth, optionalAuth, ok, safeJSON, filterContent, CATEGORIES, CATEGORY_MAP, FEE_MODES, GENDER_REQS, RATE_TAGS } from '../util.js';
 import { myPostsRouter, postsRouter, coverFields } from './posts.js';
 import { reportRouter } from './users.js';
 import { matchScore, mbtiScore, cityScore } from '../match.js';
@@ -192,6 +192,19 @@ miscRouter.get('/for-you', requireAuth, (req, res) => {
     my_city: myCity,
     my_categories: [...new Set(myCatHistory)], // 兼容旧字段
   }));
+});
+
+// ---------- 意见反馈（Ops-O5）：设置页提交入口；admin 队列见 /api/admin/feedback ----------
+miscRouter.post('/feedback', requireAuth, (req, res) => {
+  const content = String((req.body || {}).content || '').trim();
+  if (content.length < 5 || content.length > 500) {
+    return res.status(400).json({ error: '反馈内容需为 5-500 字' });
+  }
+  const f = filterContent(content);
+  if (f.hits.length) return res.status(400).json({ error: '反馈包含违规信息，请修改' });
+  db.prepare("INSERT INTO feedback (user_id, content, status, created_at) VALUES (?,?,'open',?)")
+    .run(req.user.id, f.cleaned, now());
+  res.json(ok({ submitted: true }));
 });
 
 // 挂载子路由

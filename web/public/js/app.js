@@ -138,8 +138,8 @@ const App = (() => {
   function scheduleOnboardHint(page) {
     clearTimeout(onboardHintTimer);
     const needOnboard = () => API.isLogin()
-      && localStorage.getItem('dada_need_onboard') === '1'
-      && !localStorage.getItem('dada_onboarded');
+      && safeStore.get('dada_need_onboard') === '1'
+      && !safeStore.get('dada_onboarded');
     if (!needOnboard() || page === 'discover') return;
     onboardHintTimer = setTimeout(() => {
       if (needOnboard() && !location.hash.startsWith('#/discover')) navigate('#/discover');
@@ -239,7 +239,7 @@ const App = (() => {
       // 延迟 2.5s 展示，避免打断首屏
       setTimeout(() => {
         if (!deferredPrompt || standalone()) return;
-        if (localStorage.getItem(PWA_DISMISS_KEY) === '1') return;
+        if (safeStore.get(PWA_DISMISS_KEY) === '1') return;
         showBanner();
       }, 2500);
     });
@@ -274,7 +274,7 @@ const App = (() => {
         deferredPrompt = null;
       };
       b.querySelector('#pwa-close').onclick = () => {
-        localStorage.setItem(PWA_DISMISS_KEY, '1');
+        safeStore.set(PWA_DISMISS_KEY, '1');
         hideBanner();
       };
     }

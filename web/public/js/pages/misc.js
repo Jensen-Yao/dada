@@ -152,6 +152,7 @@ App.register('myposts', async (el) => {
             ${p.meet_time ? `<span class="pill gray">${UI.icon('clock', 11)} ${UI.esc(p.meet_time)}</span>` : ''}
             ${type === 'published' ? `<span class="pill gray">已通过 ${p.approved_count}/${p.need_count}</span>` : ''}
           </div>
+          ${type === 'joined' && p.my_join === 'pending' ? '<div style="font-size:11px; color:var(--text-3); margin-top:3px;">申请处理中，可在详情页撤回</div>' : ''}
         </div>
       </div>`;
     }).join('');
@@ -361,6 +362,7 @@ App.register('settings', async (el) => {
     <div class="cell"><span class="cell-icon">${UI.icon('smartphone', 18)}</span><span class="cell-main">账号</span><span style="color:var(--text-3); font-size:13px;">${UI.esc(me.id ? '用户 #' + me.id : '')}</span></div>
     <div class="cell" id="c-safety2"><span class="cell-icon">${UI.icon('shield', 18)}</span><span class="cell-main">安全中心</span><span class="cell-arrow">›</span></div>
     <div class="cell" id="c-reports"><span class="cell-icon">${UI.icon('flag', 18)}</span><span class="cell-main">我的举报记录</span><span class="cell-arrow">›</span></div>
+    <div class="cell" id="c-feedback"><span class="cell-icon">${UI.icon('edit', 18)}</span><span class="cell-main">意见反馈</span><span class="cell-arrow">›</span></div>
     <div class="cell" id="c-partners"><span class="cell-icon">${UI.icon('people', 18)}</span><span class="cell-main">我的搭友<span class="cell-sub">互评后自动沉淀的搭子关系</span></span><span class="cell-arrow">›</span></div>
     <div class="cell" id="c-blocks"><span class="cell-icon">${UI.icon('slash', 18)}</span><span class="cell-main">黑名单</span><span class="cell-arrow">›</span></div>
     <div class="cell" id="c-rec">
@@ -371,7 +373,7 @@ App.register('settings', async (el) => {
     <div class="cell" id="c-bigfont">
       <span class="cell-icon">${UI.icon('file-text', 18)}</span>
       <span class="cell-main">大字模式<span class="cell-sub">放大界面文字，适合视力不佳或年长用户</span></span>
-      <button class="switch${localStorage.getItem('dada_bigfont') === '1' ? ' on' : ''}" id="sw-bigfont" type="button" role="switch" aria-checked="${String(localStorage.getItem('dada_bigfont') === '1')}" aria-label="大字模式开关"><span class="knob"></span></button>
+      <button class="switch${safeStore.get('dada_bigfont') === '1' ? ' on' : ''}" id="sw-bigfont" type="button" role="switch" aria-checked="${String(safeStore.get('dada_bigfont') === '1')}" aria-label="大字模式开关"><span class="knob"></span></button>
     </div>
   </div>
   <div style="margin:0 14px 14px; border-radius:16px; overflow:hidden; box-shadow:var(--shadow);">
@@ -385,6 +387,33 @@ App.register('settings', async (el) => {
   el.querySelector('#c-safety2').onclick = () => App.navigate('#/safety');
   el.querySelector('#c-reports').onclick = () => App.navigate('#/my-reports');
   el.querySelector('#c-partners').onclick = () => App.navigate('#/partners');
+
+  // 运营O5：意见反馈入口（BE 只提供 POST /feedback 收集 open 状态，无历史查询 → 提交成功即终点）
+  el.querySelector('#c-feedback').onclick = () => {
+    const s = UI.sheet('意见反馈', `
+      <textarea id="f-fb" class="textarea" maxlength="500" aria-label="反馈内容"
+        placeholder="说说你遇到的问题或产品建议（5-500 字），我们会认真查看"></textarea>
+      <div id="fb-count" style="text-align:right; font-size:11px; color:var(--text-3); margin-top:2px;">0/500</div>
+      <button class="btn primary block" id="btn-fb" style="margin-top:10px;">提交反馈</button>`, { cancel: true });
+    const ta = s.el.querySelector('#f-fb');
+    const count = s.el.querySelector('#fb-count');
+    const go = s.el.querySelector('#btn-fb');
+    ta.addEventListener('input', () => { count.textContent = `${ta.value.length}/500`; });
+    go.onclick = async () => {
+      if (go.disabled) return;
+      const text = ta.value.trim();
+      if (text.length < 5) return UI.toast('反馈内容至少 5 个字');
+      go.disabled = true;
+      try {
+        await API.post('/feedback', { content: text });
+        s.close();
+        UI.toast('反馈已提交，感谢');
+      } catch (err) {
+        UI.toast(err.message);
+        go.disabled = false;
+      }
+    };
+  };
 
   // 合规：个性化推荐开关（PUT /users/me rec_off，0=开启 1=关闭）
   const swRec = el.querySelector('#sw-rec');
@@ -403,9 +432,10 @@ App.register('settings', async (el) => {
   };
 
   // 老王P0：大字模式开关——localStorage dada_bigfont + html[data-bigfont]（app.css 覆盖层），即时生效
+  // R4-K3：读写一律走 safeStore，存储被禁时开关仍可用（仅不持久化）
   const swBig = el.querySelector('#sw-bigfont');
   const paintBigfont = () => {
-    const on = localStorage.getItem('dada_bigfont') === '1';
+    const on = safeStore.get('dada_bigfont') === '1';
     swBig.classList.toggle('on', on);
     swBig.setAttribute('aria-checked', String(on));
     if (on) document.documentElement.dataset.bigfont = '1';
@@ -413,10 +443,10 @@ App.register('settings', async (el) => {
   };
   paintBigfont();
   swBig.onclick = () => {
-    if (localStorage.getItem('dada_bigfont') === '1') localStorage.removeItem('dada_bigfont');
-    else localStorage.setItem('dada_bigfont', '1');
+    if (safeStore.get('dada_bigfont') === '1') safeStore.del('dada_bigfont');
+    else safeStore.set('dada_bigfont', '1');
     paintBigfont();
-    UI.toast(localStorage.getItem('dada_bigfont') === '1' ? '大字模式已开启' : '大字模式已关闭');
+    UI.toast(safeStore.get('dada_bigfont') === '1' ? '大字模式已开启' : '大字模式已关闭');
   };
 
   // 合规：注销账号（红字入口 → 后果说明 + 手动输入 DELETE 确认 → 不可恢复）

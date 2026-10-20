@@ -3,8 +3,9 @@ const API = (() => {
   const TOKEN_KEY = 'dada_token';
   const USER_KEY = 'dada_user';
 
-  function token() { return localStorage.getItem(TOKEN_KEY) || ''; }
-  function savedUser() { try { return JSON.parse(localStorage.getItem(USER_KEY)); } catch { return null; } }
+  // R4-K3：存储一律走 safeStore（storage.js），localStorage 被禁时不再抛 SecurityError
+  function token() { return safeStore.get(TOKEN_KEY) || ''; }
+  function savedUser() { try { return JSON.parse(safeStore.get(USER_KEY)); } catch (e) { return null; } }
 
   async function request(method, path, body) {
     const res = await fetch('/api' + path, {
@@ -19,8 +20,8 @@ const API = (() => {
     try { json = await res.json(); } catch { /* non-json */ }
     if (res.status === 401) {
       // 登录态失效，清除并跳登录（聊天页等场景除外）
-      localStorage.removeItem(TOKEN_KEY);
-      localStorage.removeItem(USER_KEY);
+      safeStore.del(TOKEN_KEY);
+      safeStore.del(USER_KEY);
       if (!location.hash.startsWith('#/login')) location.hash = '#/login';
       throw new Error(json?.error || '请先登录');
     }
@@ -47,12 +48,12 @@ const API = (() => {
   }
 
   function setSession(t, u) {
-    localStorage.setItem(TOKEN_KEY, t);
-    localStorage.setItem(USER_KEY, JSON.stringify(u));
+    safeStore.set(TOKEN_KEY, t);
+    safeStore.set(USER_KEY, JSON.stringify(u));
   }
   function clearSession() {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(USER_KEY);
+    safeStore.del(TOKEN_KEY);
+    safeStore.del(USER_KEY);
   }
 
   return {

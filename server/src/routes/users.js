@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { db, now } from '../db.js';
-import { requireAuth, optionalAuth, ok, publicUser, notify, addCredit, anyBlocked, safeJSON } from '../util.js';
+import { requireAuth, optionalAuth, ok, publicUser, notify, addCredit, anyBlocked, safeJSON, filterContent } from '../util.js';
 import { coverFields } from './posts.js'; // C9：他人主页"招募中"的局复用帖子封面兜底链
 
 export const usersRouter = Router();
@@ -62,6 +62,9 @@ usersRouter.get('/:id', optionalAuth, (req, res) => {
 // ---------- 编辑自己的资料 ----------
 usersRouter.put('/me', requireAuth, (req, res) => {
   const allowed = ['nickname', 'gender', 'birth_year', 'city', 'district', 'school', 'occupation', 'mbti', 'bio'];
+  // G-后门2（R4灰产）：这些是游客可见的"资料广告牌"字段，必须过归一化敏感词管道
+  // （此前 bio="vx:xxx"、occupation="加V看主页"、school="vx:xxx中学" 原文入库公开展示）
+  const FILTERED_FIELDS = { nickname: '昵称', bio: '简介', school: '学校', occupation: '职业' };
   const sets = [];
   const vals = [];
   const body = req.body || {};
@@ -77,6 +80,11 @@ usersRouter.put('/me', requireAuth, (req, res) => {
     } else {
       // H5：bio 与前端 maxlength=200 对齐（此前静默截断到 60 吞掉近半内容），其余字段维持 60
       v = String(v ?? '').trim().slice(0, k === 'bio' ? 200 : 60);
+      if (FILTERED_FIELDS[k]) {
+        const f = filterContent(v);
+        if (f.hits.length) return res.status(400).json({ error: `${FILTERED_FIELDS[k]}包含违规信息，请修改` });
+        v = f.cleaned;
+      }
     }
     sets.push(`${k} = ?`);
     vals.push(v);
@@ -90,6 +98,11 @@ usersRouter.put('/me', requireAuth, (req, res) => {
   }
   if (Array.isArray(body.tags)) {
     const tags = body.tags.map(String).slice(0, 10).map((t) => t.slice(0, 12));
+    // G-后门2：tags 进入 for-you 标签匹配权重，逐个过滤（"vx"/"加V"/"薇信"标签此前原样入库）
+    for (const t of tags) {
+      const f = filterContent(t);
+      if (f.hits.length) return res.status(400).json({ error: '标签包含违规信息，请修改' });
+    }
     sets.push('tags = ?');
     vals.push(JSON.stringify(tags));
   }
@@ -136,7 +149,10 @@ usersRouter.post('/me/verify', requireAuth, (req, res) => {
   if (type === 'student') {
     if (!school || !String(school).trim()) return res.status(400).json({ error: '请填写学校名称' });
     if (u.verify_student) return res.status(400).json({ error: '已通过学生认证' });
-    db.prepare('UPDATE users SET verify_student = 1, school = ? WHERE id = ?').run(String(school).trim(), u.id);
+    // G-后门2（R4灰产）：认证学校与 PUT /me 的 school 同源同风险（"vx:xxx中学"曾带徽章入库+30分）
+    const fSchool = filterContent(String(school).trim());
+    if (fSchool.hits.length) return res.status(400).json({ error: '学校名称包含违规信息，请修改' });
+    db.prepare('UPDATE users SET verify_student = 1, school = ? WHERE id = ?').run(fSchool.cleaned, u.id);
     if (!u.verify_student) addCredit(u.id, 30, '通过学生认证');
   } else if (type === 'real') {
     if (u.verify_real) return res.status(400).json({ error: '已通过真人认证' });

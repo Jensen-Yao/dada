@@ -144,7 +144,8 @@ App.register('post', async (el, seg) => {
     // H7：满员与关闭文案区分；满员给出口（点击跳广场）
     if (p.status === 'full') return '已满员，看看其他搭局';
     if (p.status !== 'open') return '该搭局已停止招募';
-    if (p.my_join === 'pending') return '已申请，等待组局者通过';
+    // R4关联[申请人退出]：申请中主按钮改"撤回申请"，点击走 confirm + POST /posts/:id/quit
+    if (p.my_join === 'pending') return '撤回申请';
     if (p.my_join === 'approved') return `${UI.icon('check-circle', 14)} 已通过，去聊天`;
     if (p.my_join === 'rejected') return '重新申请';
     return '申请加入';
@@ -157,13 +158,13 @@ App.register('post', async (el, seg) => {
     return 'primary';
   }
 
-  // 主按钮不可操作态（组局者视角/非招募中/已申请/已拉黑作者）时置灰
+  // 主按钮不可操作态（组局者视角/非招募中/已拉黑作者）时置灰；
+  // 申请中（pending）可点击 → 撤回申请
   function joinDisabled() {
     const p = post;
     if (!API.isLogin()) return false;
     if (p.is_author) return true;
     if (p.blocked_by_me === true) return true; // H5-09：已拉黑作者，不可申请
-    if (p.my_join === 'pending') return true;
     if (p.status === 'full') return false; // H7：满员可点击 → 跳广场
     if (p.status !== 'open') return true;  // closed/done/expired：灰置不可点
     return false;
@@ -206,7 +207,11 @@ App.register('post', async (el, seg) => {
     // C1：作者编辑入口（open/full 态，导航栏"编辑"）
     el.querySelector('#btn-edit')?.addEventListener('click', () => openEditSheet(p));
     el.querySelector('#btn-comment')?.addEventListener('click', onComment);
-    el.querySelector('#f-comment')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') onComment(); });
+    // R4-K4：输入法组合期 Enter 确认候选词不发送（isComposing / 旧内核 keyCode 229）
+    el.querySelector('#f-comment')?.addEventListener('keydown', (e) => {
+      if (e.isComposing || e.keyCode === 229) return;
+      if (e.key === 'Enter') onComment();
+    });
     el.querySelector('#btn-done')?.addEventListener('click', async () => {
       const yes = await UI.confirm('确认这场搭局已经顺利完成了？<br><span style="font-size:12.5px;color:var(--text-3)">完成后将开启搭后互评，双方互评可获得搭力值</span>', { okText: '完成了' });
       if (!yes) return;
@@ -257,7 +262,18 @@ App.register('post', async (el, seg) => {
     if (!API.isLogin()) return UI.requireLogin();
     const p = post;
     if (p.is_author) return;
-    if (p.my_join === 'pending') return;
+    // [申请人退出]：申请中 → confirm 后调 POST /posts/:id/quit，成功刷新回"可申请"态
+    // （BE 并行开发中，接口未上线时 toast 报错原文，申请状态不变）
+    if (p.my_join === 'pending') {
+      const yes = await UI.confirm('确定撤回这条申请吗？<br><span style="font-size:12px;color:var(--text-3)">撤回后如想加入需重新申请</span>', { okText: '撤回申请' });
+      if (!yes) return;
+      try {
+        await API.post(`/posts/${pid}/quit`, {});
+        UI.toast('已撤回申请');
+        load();
+      } catch (err) { UI.toast(err.message); }
+      return;
+    }
     // H7：满员帖给出口——跳回广场看其他搭局（按钮文案"已满员，看看其他搭局"）
     if (p.status === 'full') { App.navigate('#/square'); return; }
     if (p.status !== 'open') return;
@@ -424,7 +440,7 @@ App.register('post', async (el, seg) => {
       App.navigate('#/partners');
     };
     box.querySelector('#rel-end').onclick = () => {
-      localStorage.setItem(relEndKey(), '1');
+      safeStore.set(relEndKey(), '1');
       API.post(`/posts/${pid}/relationship`, { choice: 'end' }).catch(() => {});
       const blk = box.querySelector('#rel-block');
       if (blk) blk.outerHTML = relBlockHTML(true);
@@ -455,8 +471,8 @@ App.register('post', async (el, seg) => {
       });
       // VD-03 FE-3：互评完成（自己评过 / BE 契约字段 my_rated）且未归档 → 面板底部三选一区块；
       // 已选"到此为止"（localStorage 记 post_id）→ 收起为"已归档"
-      const iRated = localStorage.getItem(ratedKey()) === '1' || p.my_rated === true;
-      const ended = localStorage.getItem(relEndKey()) === '1';
+      const iRated = safeStore.get(ratedKey()) === '1' || p.my_rated === true;
+      const ended = safeStore.get(relEndKey()) === '1';
       if (iRated || ended) {
         box.insertAdjacentHTML('beforeend', relBlockHTML(ended));
         bindRelBlock(p);
@@ -509,7 +525,7 @@ App.register('post', async (el, seg) => {
           ratee_id: rateeId, stars,
           tags: [...picked], comment: s.el.querySelector('#f-rc').value,
         });
-        localStorage.setItem(ratedKey(), '1'); // VD-03：自己评完 → 互评面板底部出三选一
+        safeStore.set(ratedKey(), '1'); // VD-03：自己评完 → 互评面板底部出三选一
         s.close();
         UI.toast('评价成功，感谢反馈');
         load();

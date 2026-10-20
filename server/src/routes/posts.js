@@ -152,7 +152,9 @@ postsRouter.post('/', requireAuth, (req, res) => {
   const fTitle = filterContent(t);
   const fContent = filterContent(c);
   const fReq = filterContent(String(requirements || ''));
-  if (fTitle.hits.length || fContent.hits.length || fReq.hits.length) {
+  // G-后门2（R4灰产）：地点名此前未过滤，原文入库公开展示（"西湖边上 vx:xxx"广告牌）
+  const fLoc = filterContent(String(location_name || ''));
+  if (fTitle.hits.length || fContent.hits.length || fReq.hits.length || fLoc.hits.length) {
     return res.status(400).json({ error: '内容包含违规信息（导流/欺诈/违规词汇），请修改后发布。如需联系请使用站内聊天。' });
   }
 
@@ -172,7 +174,7 @@ postsRouter.post('/', requireAuth, (req, res) => {
     INSERT INTO posts (user_id, category, title, content, city, location_name, meet_time, need_count, fee_mode, gender_req, requirements, status, created_at)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,'open',?)
   `).run(u.id, category, fTitle.cleaned, fContent.cleaned, cityS,
-    String(location_name || '').slice(0, 50), String(meet_time || '').slice(0, 30), nc, fm, gender_req || 'any', fReq.cleaned, now());
+    fLoc.cleaned.slice(0, 50), String(meet_time || '').slice(0, 30), nc, fm, gender_req || 'any', fReq.cleaned, now());
   db.prepare('UPDATE users SET last_active_at = ? WHERE id = ?').run(now(), u.id);
   const p = db.prepare('SELECT * FROM posts WHERE id = ?').get(info.lastInsertRowid);
   trackEvent(u.id, 'publish', p.id); // VD-01 漏斗：发布
@@ -225,6 +227,9 @@ postsRouter.put('/:id', requireAuth, (req, res) => {
   }
   if (body.status !== undefined) {
     if (!['open', 'closed', 'done'].includes(body.status)) return res.status(400).json({ error: '状态不合法' });
+    // T3-P0（R4状态机）done 幂等护栏：已完成局拒绝任何再改状态——
+    // 此前重复 done（双击/网络重试）重复给全员加分+落重复通知；且 done→open→done 可无限循环刷分。
+    if (p.status === 'done') return res.status(400).json({ error: '该搭局已完成' });
     sets.push('status = ?'); vals.push(body.status);
     if (body.status === 'done') {
       completePost(p);
@@ -302,7 +307,8 @@ postsRouter.post('/:id/join', requireAuth, (req, res) => {
   if (p.status !== 'open') return res.status(400).json({ error: '该搭局已停止招募' });
   if (p.user_id === req.user.id) return res.status(400).json({ error: '不能加入自己发布的搭局' });
   const exist = db.prepare('SELECT * FROM joins WHERE post_id = ? AND user_id = ?').get(p.id, req.user.id);
-  if (exist && exist.status !== 'rejected') return res.status(400).json({ error: '已申请过该搭局' });
+  // rejected / quit 可重新申请（退出通道不是单行道）；pending/approved 不可重复申请
+  if (exist && exist.status !== 'rejected' && exist.status !== 'quit') return res.status(400).json({ error: '已申请过该搭局' });
   // 性别限制
   if (p.gender_req !== 'any' && req.user.gender !== p.gender_req) {
     return res.status(403).json({ error: p.gender_req === 'female' ? '该搭局仅限女生参加' : '该搭局仅限男生参加' });
@@ -347,8 +353,21 @@ postsRouter.post('/:id/joins/:joinId/approve', requireAuth, (req, res) => {
   const j = db.prepare('SELECT * FROM joins WHERE id = ? AND post_id = ?').get(parseInt(req.params.joinId), parseInt(req.params.id));
   if (!p || !j) return res.status(404).json({ error: '申请不存在' });
   if (p.user_id !== req.user.id) return res.status(403).json({ error: '只有组局者可以操作' });
+  // T4（R4状态机）帖子状态守卫：approve 此前从不读 p.status——expired/closed 局被批准并
+  // "复活"为 full（jobs 置 expired 与组局者点通过交错时），expired_count 与 approved_count 从此对不上。
+  if (p.status !== 'open' && p.status !== 'full') {
+    return res.status(400).json({ error: '该搭局已过期或结束' });
+  }
   if (j.status !== 'pending') return res.status(400).json({ error: '该申请已处理' });
   const approve = !!((req.body || {}).approve);
+  // T5（R4状态机）账号状态复查：申请人已注销/封禁时不占用名额、不建会话、不涨搭力值——
+  // 该 join 直接置 rejected 并向组局者说明（对齐 chat WS 每帧点查 users.status 的口径）。
+  const applicant = db.prepare('SELECT status FROM users WHERE id = ?').get(j.user_id);
+  const applicantActive = !!applicant && applicant.status === 'active';
+  if (approve && !applicantActive) {
+    db.prepare("UPDATE joins SET status = 'rejected', updated_at = ? WHERE id = ?").run(now(), j.id);
+    return res.status(400).json({ error: '该用户账号已注销或异常，其申请已自动拒绝' });
+  }
   const approved = db.prepare("SELECT COUNT(*) c FROM joins WHERE post_id = ? AND status = 'approved'").get(p.id).c;
   if (approve && approved >= p.need_count) return res.status(400).json({ error: '人数已满' });
   db.prepare("UPDATE joins SET status = ?, updated_at = ? WHERE id = ?").run(approve ? 'approved' : 'rejected', now(), j.id);
@@ -368,10 +387,28 @@ postsRouter.post('/:id/joins/:joinId/approve', requireAuth, (req, res) => {
         notify(pj.user_id, 'join_result', '申请未通过', `「${p.title}」该搭局已满员，未能通过你的申请，别灰心，广场上还有更多搭局`, { post_id: p.id });
       }
     }
-  } else {
+  } else if (applicantActive) {
+    // 已注销/封禁用户不再投递通知（T5：避免给死账号落无效数据）
     notify(j.user_id, 'join_result', '申请未通过', `「${p.title}」的组局者未通过你的申请，别灰心，广场上还有更多搭局`, { post_id: p.id });
   }
   res.json(ok({ approved }));
+});
+
+// ---------- 申请人退出申请（T2：激活 joins.status 的 quit 死枚举） ----------
+// 仅本人、仅 pending/rejected 可退出；approved 已占名额不可自行退出（找组局者拒绝处理）。
+// quit 的申请不回流：满员扩容恢复 rejected→pending 时不会捞 quit 行（见 PUT /:id 扩容分支）。
+postsRouter.post('/:id/quit', requireAuth, (req, res) => {
+  const p = db.prepare('SELECT * FROM posts WHERE id = ?').get(parseInt(req.params.id));
+  if (!p) return res.status(404).json({ error: '搭局不存在' });
+  const j = db.prepare('SELECT * FROM joins WHERE post_id = ? AND user_id = ?').get(p.id, req.user.id);
+  if (!j) return res.status(404).json({ error: '你没有申请过该搭局' });
+  if (j.status === 'quit') return res.status(400).json({ error: '已退出过该搭局' });
+  if (j.status !== 'pending' && j.status !== 'rejected') {
+    return res.status(400).json({ error: '申请已通过，无法退出' });
+  }
+  db.prepare("UPDATE joins SET status = 'quit', updated_at = ? WHERE id = ?").run(now(), j.id);
+  notify(p.user_id, 'join_quit', '申请人退出', `${req.user.nickname} 退出了「${p.title}」的申请`, { post_id: p.id }, req.user.id);
+  res.json(ok({ quit: true }));
 });
 
 // R2-N7: 组局结束（done）时婉拒剩余 pending（复用满员同款逻辑）
@@ -425,10 +462,20 @@ postsRouter.post('/:id/rate', requireAuth, (req, res) => {
 });
 
 // 搭局完成时给参与者加分
+// T3-P0（R4状态机）二道守卫：0 个 approved 成员的局不算"完成搭局"——
+// 状态照常流转，但作者不加分，封死"发帖→立即done→+20"的无限刷分循环；
+// （PUT 路由的 status 幂等守卫是第一道，这里是函数级兜底。）
+// T5：加分/通知前复查用户状态，已注销/封禁的成员跳过（对齐 approve 侧口径）。
 function completePost(p) {
-  addCredit(p.user_id, 20, `「${p.title}」搭局完成`);
   const members = db.prepare("SELECT user_id FROM joins WHERE post_id = ? AND status = 'approved'").all(p.id);
+  if (!members.length) return;
+  const author = db.prepare('SELECT status FROM users WHERE id = ?').get(p.user_id);
+  if (author && author.status === 'active') {
+    addCredit(p.user_id, 20, `「${p.title}」搭局完成`);
+  }
   for (const m of members) {
+    const mu = db.prepare('SELECT status FROM users WHERE id = ?').get(m.user_id);
+    if (!mu || mu.status !== 'active') continue; // 非active成员：不加分、不落通知
     addCredit(m.user_id, 20, `「${p.title}」搭局完成`);
     notify(m.user_id, 'post_done', '搭局已完成', `「${p.title}」已标记完成，别忘了给搭子们留下评价哦`, { post_id: p.id });
   }

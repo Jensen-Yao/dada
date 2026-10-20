@@ -118,6 +118,29 @@ adminRouter.post('/reports/:id/resolve', (req, res) => {
   res.json(ok({ resolved: true, action }));
 });
 
+// ---------- 意见反馈队列（Ops-O5） ----------
+adminRouter.get('/feedback', (req, res) => {
+  const status = ['open', 'resolved'].includes(req.query.status) ? req.query.status : 'open';
+  const rows = db.prepare(`
+    SELECT f.*, u.nickname user_nickname, u.status user_status FROM feedback f
+    LEFT JOIN users u ON f.user_id = u.id
+    WHERE f.status = ? ORDER BY f.id DESC LIMIT 200
+  `).all(status);
+  res.json(ok(rows));
+});
+
+adminRouter.post('/feedback/:id/resolve', (req, res) => {
+  const f = db.prepare('SELECT * FROM feedback WHERE id = ?').get(parseInt(req.params.id));
+  if (!f) return res.status(404).json({ error: '反馈不存在' });
+  if (f.status === 'resolved') return res.status(400).json({ error: '该反馈已处理' });
+  const action_text = String((req.body || {}).action_text || '').trim().slice(0, 200);
+  if (!action_text) return res.status(400).json({ error: '请填写处理说明' });
+  db.prepare("UPDATE feedback SET status = 'resolved', action_text = ? WHERE id = ?").run(action_text, f.id);
+  // 处理结果回告提交人（对齐举报处理的留痕口径）
+  notify(f.user_id, 'feedback_result', '反馈已处理', `你提交的反馈已被处理：${action_text}`, { feedback_id: f.id });
+  res.json(ok({ resolved: true, action_text }));
+});
+
 // ---------- 用户管理 ----------
 adminRouter.get('/users', (req, res) => {
   const q = `%${String(req.query.keyword || '').trim()}%`;
