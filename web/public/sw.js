@@ -7,12 +7,14 @@
    - 导航请求：Network-First，失败回退 /（SPA 壳离线可开）
    - /ws 与一切非 GET 请求：绝不拦截，直接放行
    ============================================================ */
-const VERSION = 'v2';
-const STATIC_CACHE = `dada-static-${VERSION}`;   // 静态资源（版本化缓存 dada-static-v2）
-const API_CACHE = `dada-api-${VERSION}`;         // 接口 GET 兜底（dada-api-v2）
+const VERSION = 'v3';
+const STATIC_CACHE = `dada-static-${VERSION}`;   // 静态资源（版本化缓存 dada-static-v3）
+const API_CACHE = `dada-api-${VERSION}`;         // 接口 GET 兜底（dada-api-v3）
 const KEEP = [STATIC_CACHE, API_CACHE];
 
 // 预缓存：SPA 壳核心资源（离线可开）
+// 性能F1：12 个页面脚本全部纳入预缓存——首访即写缓存，离线 reload 不再因
+// /js/pages/*.js 拉取失败而白屏（此前仅缓存壳四件套，离线时页面路由全部落空）
 const PRECACHE = [
   '/',
   '/css/app.css',
@@ -22,6 +24,18 @@ const PRECACHE = [
   '/js/ui.js',
   '/js/ws.js',
   '/js/app.js',
+  '/js/pages/login.js',
+  '/js/pages/square.js',
+  '/js/pages/post.js',
+  '/js/pages/publish.js',
+  '/js/pages/discover.js',
+  '/js/pages/chat.js',
+  '/js/pages/conv.js',
+  '/js/pages/me.js',
+  '/js/pages/user.js',
+  '/js/pages/misc.js',
+  '/js/pages/admin.js',
+  '/js/pages/legal.js',
   '/img/logo.svg',
 ];
 

@@ -227,6 +227,10 @@ CREATE TABLE IF NOT EXISTS partners (
 );
 `);
 
+// R3-C7/L3 举报处理留痕：admin resolve 写入处理时间与动作，举报人经 /api/reports/mine 查询进度
+try { db.exec('ALTER TABLE reports ADD COLUMN resolved_at INTEGER DEFAULT NULL'); } catch { /* 列已存在 */ }
+try { db.exec('ALTER TABLE reports ADD COLUMN resolve_action TEXT DEFAULT NULL'); } catch { /* 列已存在 */ }
+
 export function now() {
   return Date.now();
 }

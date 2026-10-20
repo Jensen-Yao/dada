@@ -1554,6 +1554,208 @@ test('满员自动婉拒：帖子 full 时剩余 pending 置 rejected 并通知�
   assert.ok(n.body.includes('满员'), '通知正文应说明满员: ' + n.body);
 });
 
+// ==================================================================
+// R3 批评修复回归：B9 seed点赞一致 / B1 性别局过滤 / B2 满员扩容闭环 /
+// B3 验证码找回密码 / B4 举报进度查询 / B5 主页 open_posts / B8 dismiss 返还
+// （置于"登录限流"用例之前：该用例会耗尽本测试出口 IP 的登录限额）
+// ==================================================================
+
+test('B9 P1-3 seed数据：likes_count 与 likes 表行数一致（假点赞修复）', async () => {
+  const { db } = await import('../src/db.js');
+  const rows = db.prepare(`
+    SELECT p.id, p.likes_count, (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) actual
+    FROM posts p
+  `).all();
+  assert.ok(rows.length >= 24, 'seed posts present');
+  for (const r of rows) {
+    assert.equal(r.likes_count, r.actual, `post ${r.id}: likes_count must equal real likes rows`);
+  }
+  const withLikes = rows.filter((r) => r.actual > 0).length;
+  assert.ok(withLikes >= 10, `seed should generate real like rows for most posts, got ${withLikes}`);
+});
+
+test('B1 P1-4 性别局过滤：for-you/recommend 不再推荐不可加入的性别局（男生/secret视角）', async () => {
+  const { db } = await import('../src/db.js');
+  // A（女）发仅限男生局 + 仅限女生局
+  const pm = await api('POST', '/api/posts', { category: 'game', title: 'R3仅男生过滤局', content: 'x', city: '北京', gender_req: 'male' }, tokenA);
+  const pf = await api('POST', '/api/posts', { category: 'coffee', title: 'R3仅女生过滤局', content: 'x', city: '北京', gender_req: 'female' }, tokenA);
+  assert.equal(pm.status, 200);
+  assert.equal(pf.status, 200);
+  const malePid = pm.json.data.id, femalePid = pf.json.data.id;
+  // 收窄候选池：临时关闭其他开放帖，保证过滤断言非空转（finally 恢复）
+  const others = db.prepare("SELECT id FROM posts WHERE status = 'open' AND id NOT IN (?, ?)").all(malePid, femalePid).map((r) => r.id);
+  if (others.length) db.prepare(`UPDATE posts SET status = 'closed' WHERE id IN (${others.map(() => '?').join(',')})`).run(...others);
+  try {
+    // 男生视角（B）：仅男生局可见，仅女生局必须被硬过滤
+    const fyB = await api('GET', '/api/for-you', null, tokenB);
+    assert.equal(fyB.status, 200);
+    const idsB = fyB.json.data.list.map((p) => p.id);
+    assert.ok(idsB.includes(malePid), 'male viewer still sees male-only post');
+    assert.equal(idsB.includes(femalePid), false, 'male viewer for-you must filter female-only post');
+    const recB = await api('GET', '/api/recommend?city=北京', null, tokenB);
+    assert.equal(recB.status, 200);
+    assert.equal(recB.json.data.list.some((p) => p.id === femalePid), false, 'male viewer recommend must filter female-only post');
+    assert.ok(recB.json.data.list.some((p) => p.id === malePid), 'male viewer recommend keeps male-only post');
+    // secret 用户（未公开性别）：只看不限性别 → 池内两条限制局全被过滤
+    const sms = await api('POST', '/api/auth/sms/send', { phone: '13699990000' });
+    assert.equal(sms.status, 200);
+    const reg = await api('POST', '/api/auth/register', {
+      phone: '13699990000', code: sms.json.data.demo_code, password: '123456',
+      nickname: '未公开性别', adult_confirmed: true,
+    });
+    assert.equal(reg.status, 200);
+    assert.equal(reg.json.data.user.gender, 'secret');
+    const fyS = await api('GET', '/api/for-you', null, reg.json.data.token);
+    assert.equal(fyS.status, 200);
+    assert.equal(fyS.json.data.list.length, 0, 'secret user sees no gender-restricted posts (pool only has male/female-only)');
+    // 广场不受影响：全量可见（发现性保留）
+    const square = await api('GET', '/api/posts?keyword=R3仅女生过滤局');
+    assert.equal(square.json.data.list.length, 1, 'square feed keeps full visibility');
+  } finally {
+    if (others.length) db.prepare(`UPDATE posts SET status = 'open' WHERE id IN (${others.map(() => '?').join(',')})`).run(...others);
+  }
+});
+
+test('B2 C2 满员扩容闭环：扩容回open + rejected批量回pending + 回流通知', async () => {
+  const created = await api('POST', '/api/posts', { category: 'food', title: 'R3扩容回归局', content: 'x', city: '北京', need_count: 1 }, tokenA);
+  assert.equal(created.status, 200);
+  const pid = created.json.data.id;
+  await api('POST', `/api/posts/${pid}/join`, { message: '乙申请' }, tokenB);
+  await api('POST', `/api/posts/${pid}/join`, { message: '丙申请' }, tokenC);
+  const joins = await api('GET', `/api/posts/${pid}/joins`, null, tokenA);
+  const jB = joins.json.data.find((x) => x.user.id === userIdB);
+  const ap = await api('POST', `/api/posts/${pid}/joins/${jB.id}/approve`, { approve: true }, tokenA);
+  assert.equal(ap.status, 200);
+  const d0 = await api('GET', `/api/posts/${pid}`);
+  assert.equal(d0.json.data.status, 'full', 'approved=need_count → full');
+  // 扩容 1 → 2：status 回 open，被满员婉拒的 C 的申请回到 pending 并收到回流通知
+  const put = await api('PUT', `/api/posts/${pid}`, { need_count: 2 }, tokenA);
+  assert.equal(put.status, 200);
+  assert.equal(put.json.data.status, 'open', 'expanding a full post reopens recruitment');
+  assert.equal(put.json.data.approved_count, 1);
+  const joins2 = await api('GET', `/api/posts/${pid}/joins`, null, tokenA);
+  assert.equal(joins2.json.data.find((x) => x.user.id === userIdC).status, 'pending', 'auto-rejected join restored to pending');
+  const notifs = await api('GET', '/api/notifications', null, tokenC);
+  const n = notifs.json.data.find((x) => x.type === 'join_result' && x.data && x.data.post_id === pid && x.body.includes('扩容'));
+  assert.ok(n, 'C should receive reopen notification');
+  // 扩容后新用户可以申请（此前 full 时 400"已停止招募"）
+  const jD = await api('POST', `/api/posts/${pid}/join`, { message: '丁申请' }, tokenD);
+  assert.equal(jD.status, 200, 'new join allowed after expansion');
+  // A 通过 D → 再次满员；此时降到 1 人 < 已通过 2 人 → 400
+  const joins3 = await api('GET', `/api/posts/${pid}/joins`, null, tokenA);
+  const jDrow = joins3.json.data.find((x) => x.user.id === userIdD);
+  await api('POST', `/api/posts/${pid}/joins/${jDrow.id}/approve`, { approve: true }, tokenA);
+  const d2 = await api('GET', `/api/posts/${pid}`);
+  assert.equal(d2.json.data.status, 'full', 'full again at approved=2');
+  const bad = await api('PUT', `/api/posts/${pid}`, { need_count: 1 }, tokenA);
+  assert.equal(bad.status, 400, 'need_count below approved count still rejected');
+});
+
+test('B3 C5 验证码找回/重置密码：scene=reset 下发 + 一次性消费 + 旧密码失效', async () => {
+  const PHONE_C = '13544445555';
+  // 注册一个手机号用户（注册成功即消费验证码 → 60s 重发限制不阻碍立刻为 reset 再发一条）
+  const sms1 = await api('POST', '/api/auth/sms/send', { phone: PHONE_C });
+  assert.equal(sms1.status, 200);
+  const reg = await api('POST', '/api/auth/register', {
+    phone: PHONE_C, code: sms1.json.data.demo_code, password: '123456',
+    nickname: '重置密码用户', adult_confirmed: true,
+  });
+  assert.equal(reg.status, 200);
+  // 注册通道对已注册号码 409；reset 通道放行
+  const again = await api('POST', '/api/auth/sms/send', { phone: PHONE_C });
+  assert.equal(again.status, 409);
+  const sms2 = await api('POST', '/api/auth/sms/send', { phone: PHONE_C, scene: 'reset' });
+  assert.equal(sms2.status, 200, 'reset scene allows registered phone');
+  const code = sms2.json.data.demo_code;
+  // 错误验证码 → 400（不烧码）
+  const bad = await api('POST', '/api/auth/password/reset', { phone: PHONE_C, code: '000000', password: 'newpass123' });
+  assert.equal(bad.status, 400);
+  // 未注册手机号 → 404
+  const sms3 = await api('POST', '/api/auth/sms/send', { phone: '13611112222' });
+  assert.equal(sms3.status, 200);
+  const unreg = await api('POST', '/api/auth/password/reset', { phone: '13611112222', code: sms3.json.data.demo_code, password: 'newpass123' });
+  assert.equal(unreg.status, 404);
+  assert.equal(unreg.json.error, '该手机号未注册');
+  // 密码过短 → 400（验证码不消费）
+  const short = await api('POST', '/api/auth/password/reset', { phone: PHONE_C, code, password: '123' });
+  assert.equal(short.status, 400);
+  assert.equal(short.json.error, '密码至少 6 位');
+  // 正确重置
+  const okR = await api('POST', '/api/auth/password/reset', { phone: PHONE_C, code, password: 'newpass123' });
+  assert.equal(okR.status, 200);
+  assert.equal(okR.json.data.reset, true);
+  // 旧密码 401 / 新密码 200
+  const oldLogin = await api('POST', '/api/auth/login', { phone: PHONE_C, password: '123456' });
+  assert.equal(oldLogin.status, 401);
+  const newLogin = await api('POST', '/api/auth/login', { phone: PHONE_C, password: 'newpass123' });
+  assert.equal(newLogin.status, 200);
+  // 验证码一次性：重放 → 400
+  const replay = await api('POST', '/api/auth/password/reset', { phone: PHONE_C, code, password: 'another123' });
+  assert.equal(replay.status, 400, 'code is single-use across register & reset');
+});
+
+test('B4 C7 举报进度查询：GET /api/reports/mine 挂载生效，含处理时间与动作说明', async () => {
+  const anon = await api('GET', '/api/reports/mine');
+  assert.equal(anon.status, 401, 'requires login');
+  const r = await api('GET', '/api/reports/mine', null, tokenB);
+  assert.equal(r.status, 200);
+  assert.ok(Array.isArray(r.json.data), 'reports/mine returns array');
+  assert.ok(r.json.data.length >= 1, 'B has reports from earlier tests');
+  for (const row of r.json.data) {
+    assert.ok(['pending', 'resolved'].includes(row.status));
+    if (row.status === 'resolved') {
+      assert.equal(typeof row.resolved_at, 'number', 'resolved report carries resolved_at');
+      assert.equal(typeof row.action_text, 'string', 'resolved report carries action_text');
+    } else {
+      assert.equal(row.resolved_at, null);
+      assert.equal(row.action_text, null);
+    }
+  }
+  const resolved = r.json.data.find((x) => x.status === 'resolved');
+  assert.ok(resolved, 'earlier admin resolve(warn) marked B report resolved');
+  assert.ok(resolved.action_text.includes('警告'), 'action_text describes the action: ' + resolved.action_text);
+});
+
+test('B5 C9 他人主页返回 open_posts（招募中的局，≤5条，含封面）', async () => {
+  const r = await api('GET', `/api/users/${userIdA}`);
+  assert.equal(r.status, 200);
+  const d = r.json.data;
+  assert.ok(Array.isArray(d.open_posts), 'open_posts field exists');
+  assert.ok(d.open_posts.length >= 1, 'A has open posts');
+  assert.ok(d.open_posts.length <= 5, 'open_posts limited to 5');
+  for (const p of d.open_posts) {
+    for (const k of ['id', 'title', 'category', 'city', 'meet_time', 'cover']) {
+      assert.ok(k in p, `open_posts item has ${k}`);
+    }
+    assert.ok(p.cover, 'cover resolved via coverFields fallback chain');
+  }
+});
+
+test('B8 L3 举报驳回返还：dismiss 后被举报用户返还 +20 搭力值', async () => {
+  const { db } = await import('../src/db.js');
+  const t1 = await api('POST', '/api/auth/register', { username: 'l3_target', password: '123456', nickname: 'L3被举报者' });
+  const t2 = await api('POST', '/api/auth/register', { username: 'l3_reporter', password: '123456', nickname: 'L3举报者' });
+  const targetId = t1.json.data.user.id;
+  const rp = t2.json.data.token;
+  const credit = () => db.prepare('SELECT credit FROM users WHERE id = ?').get(targetId).credit;
+  const before = credit(); // 新用户 600
+  await api('POST', `/api/users/${targetId}/report`, { reason: '骚扰' }, rp);
+  assert.equal(credit(), before - 20, 'report deducts 20');
+  const reports = await api('GET', '/api/admin/reports?status=pending', null, tokenAdmin);
+  const rid = reports.json.data.find((x) => x.target_type === 'user' && x.target_id === targetId).id;
+  const res = await api('POST', `/api/admin/reports/${rid}/resolve`, { action: 'dismiss' }, tokenAdmin);
+  assert.equal(res.status, 200);
+  assert.equal(credit(), before, 'dismiss refunds +20, net zero');
+  // 被举报人收到返还通知；举报人收到处理结果通知
+  const targetNotifs = await api('GET', '/api/notifications', null, t1.json.data.token);
+  assert.ok(
+    targetNotifs.json.data.some((x) => x.type === 'credit' && x.body.includes('举报不实，返还搭力值')),
+    'target notified of refund'
+  );
+  const rpNotifs = await api('GET', '/api/notifications', null, rp);
+  assert.ok(rpNotifs.json.data.some((x) => x.type === 'report_result' && x.body.includes('未发现违规')), 'reporter notified of dismissal');
+});
+
 test('登录限流：每IP 15分钟20次，超出429"尝试过于频繁"（S8）', async () => {
   // 此前套件内已有若干次 /auth/login（同一测试出口 IP）——继续尝试直到触发限流窗口
   let hitAt = -1;

@@ -153,7 +153,7 @@ const App = (() => {
     const page = seg[0] || 'square';
 
     // 权限控制
-    const privatePages = ['publish', 'chat', 'me', 'notifications', 'myposts', 'settings', 'partners', 'admin'];
+    const privatePages = ['publish', 'chat', 'me', 'notifications', 'myposts', 'settings', 'partners', 'admin', 'my-reports'];
     if (privatePages.includes(page) && !API.isLogin()) {
       UI.toast('请先登录');
       location.hash = '#/login';

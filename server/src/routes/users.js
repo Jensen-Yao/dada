@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { db, now } from '../db.js';
 import { requireAuth, optionalAuth, ok, publicUser, notify, addCredit, anyBlocked, safeJSON } from '../util.js';
+import { coverFields } from './posts.js'; // C9：他人主页"招募中"的局复用帖子封面兜底链
 
 export const usersRouter = Router();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -45,6 +46,12 @@ usersRouter.get('/:id', optionalAuth, (req, res) => {
     SELECT p.id, p.title, p.category, p.meet_time FROM posts p
     WHERE p.user_id = ? AND p.status = 'done' ORDER BY p.id DESC LIMIT 5
   `).all(u.id);
+  // C9（R3完整性）：TA 正在招募的局——个人页最核心的内容分发位，
+  // 此前只有 recent_done，开放中的局不展示，从主页无法约 TA 现在的局
+  pu.open_posts = db.prepare(`
+    SELECT p.id, p.title, p.category, p.city, p.meet_time FROM posts p
+    WHERE p.user_id = ? AND p.status = 'open' ORDER BY p.id DESC LIMIT 5
+  `).all(u.id).map((p) => ({ ...p, ...coverFields(p) }));
   // 拉黑关系字段（R1延期项）：登录视角标记"我是否拉黑了 TA"，用于用户主页"已拉黑"标识，游客恒 false
   pu.blocked_by_me = req.user
     ? !!db.prepare('SELECT 1 FROM blocks WHERE blocker_id = ? AND blocked_id = ?').get(req.user.id, u.id)
@@ -246,7 +253,15 @@ export function reportRouter(Router) {
   });
   r.get('/mine', requireAuth, (req, res) => {
     const rows = db.prepare('SELECT * FROM reports WHERE reporter_id = ? ORDER BY id DESC LIMIT 50').all(req.user.id);
-    res.json(ok(rows));
+    // C7（R3完整性）：补充处理进度——resolved 时间与处理动作说明（未处理为 null），不再"已收到举报"后黑盒
+    const ACTION_TEXT = { warn: '已警告对方', ban: '已封禁/下架', dismiss: '未发现违规，举报不实' };
+    res.json(ok(rows.map((r) => ({
+      ...r,
+      resolved_at: r.resolved_at ?? null,
+      action_text: r.status === 'resolved' && r.resolve_action
+        ? (ACTION_TEXT[r.resolve_action] || '已处理')
+        : null,
+    }))));
   });
   return r;
 }

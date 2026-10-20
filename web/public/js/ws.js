@@ -4,6 +4,9 @@ const WS = (() => {
   let handlers = new Map();
   let retry = 0;
   let pingTimer = null;
+  // 架构F4：重连次数上限——超限停止自动重连并提示用户手动刷新；
+  // 99 为"永久停止"哨兵（登出 disconnect / 认证失败复用）
+  const MAX_RETRY = 8;
 
   function connect() {
     if (!API.isLogin()) return;
@@ -38,15 +41,29 @@ const WS = (() => {
         retry = 99;
         return;
       }
-      // 断线重连（指数退避，上限30s）
-      if (API.isLogin()) {
-        retry++;
-        const delay = Math.min(30000, 1000 * 2 ** Math.min(retry, 5));
-        setTimeout(connect, delay);
+      if (!API.isLogin()) return;
+      // 架构F4：指数退避重连最多 MAX_RETRY 次，超限放弃并给出可执行出口
+      if (retry >= MAX_RETRY) {
+        UI.toast('网络连接已断开，请刷新页面重试', 4000);
+        return;
       }
+      retry++;
+      const delay = Math.min(30000, 1000 * 2 ** Math.min(retry, 5));
+      setTimeout(connect, delay);
     };
     sock.onerror = () => { try { sock.close(); } catch { /* ignore */ } };
   }
+
+  // 架构F4：网络恢复（wifi/流量切换）——在线事件即立即重连并重置计数，
+  // 不再等下一轮退避定时器（此前断网超限后永无翻身机会）
+  window.addEventListener('online', () => {
+    if (!API.isLogin()) return;
+    const dead = !sock || sock.readyState > 1; // 0/1=连接中/已连，2/3=关闭中/已关
+    if (dead) {
+      retry = 0;
+      connect();
+    }
+  });
 
   function disconnect() {
     handlers.clear();

@@ -30,7 +30,7 @@ function clientIp(req) {
 const PHONE_RE = /^1[3-9]\d{9}$/;
 
 authRouter.post('/sms/send', (req, res) => {
-  const { phone } = req.body || {};
+  const { phone, scene } = req.body || {};
   if (!PHONE_RE.test(String(phone || ''))) {
     return res.status(400).json({ error: '手机号格式不正确' });
   }
@@ -40,8 +40,14 @@ authRouter.post('/sms/send', (req, res) => {
   if (ipLog.length >= SMS_IP_LIMIT) {
     return res.status(429).json({ error: '发送过于频繁，请稍后再试' });
   }
-  // 已注册判断排除已注销账号（注销后手机号可释放复用）
-  if (db.prepare("SELECT 1 FROM users WHERE phone = ? AND status != 'deleted'").get(phone)) {
+  // C5（R3完整性）：scene='reset' = 找回/重置密码通道——手机号必须已注册（与注册通道互为镜像）；
+  // 默认 scene='register' 维持原行为（已注册 409）。两通道共用同一 smsCodes 存储，
+  // 验证码一次性消费（成功即删），注册用过的码不能复用于重置，反之亦然。
+  if (scene === 'reset') {
+    if (!db.prepare("SELECT 1 FROM users WHERE phone = ? AND status != 'deleted'").get(phone)) {
+      return res.status(404).json({ error: '该手机号未注册' });
+    }
+  } else if (db.prepare("SELECT 1 FROM users WHERE phone = ? AND status != 'deleted'").get(phone)) {
     return res.status(409).json({ error: '该手机号已注册' });
   }
   const t = Date.now();
@@ -180,6 +186,30 @@ authRouter.post('/login', (req, res) => {
   }
   db.prepare('UPDATE users SET last_active_at = ? WHERE id = ?').run(now(), user.id);
   res.json(ok({ token: signToken(user), user: publicUser(user) }));
+});
+
+// ---------- C5（R3完整性）：验证码找回/重置密码 ----------
+// 手机号注册却不能短信找回 = 忘密码永久锁号。复用 smsCodes 验证（scene='reset' 下发），
+// 验证码一次性消费：仅重置成功时删除，失败尝试不烧码；注册与重置共用一个通道，不可重放。
+authRouter.post('/password/reset', (req, res) => {
+  const { phone, code, password } = req.body || {};
+  if (!PHONE_RE.test(String(phone || ''))) {
+    return res.status(400).json({ error: '手机号格式不正确' });
+  }
+  if (!verifySmsCode(phone, code)) {
+    return res.status(400).json({ error: '验证码错误或已过期' });
+  }
+  const user = db.prepare("SELECT * FROM users WHERE phone = ? AND status != 'deleted'").get(String(phone));
+  if (!user) {
+    return res.status(404).json({ error: '该手机号未注册' });
+  }
+  if (!password || String(password).length < 6) {
+    return res.status(400).json({ error: '密码至少 6 位' });
+  }
+  const hash = bcrypt.hashSync(String(password), 10);
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, user.id);
+  smsCodes.delete(phone); // 成功即消费（注意顺序：校验全过才删，失败不烧码）
+  res.json(ok({ reset: true }));
 });
 
 authRouter.get('/me', requireAuth, (req, res) => {

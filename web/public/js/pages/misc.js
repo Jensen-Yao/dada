@@ -252,6 +252,43 @@ App.register('notifications', async (el) => {
   App.onCleanup(() => clearTimeout(readTimer));
 });
 
+/* ================= 我的举报记录（C7：举报进度可回查） ================= */
+App.register('my-reports', async (el) => {
+  el.innerHTML = `
+  <div class="navbar">
+    <div class="navbar-inner">
+      <button class="navbar-btn" onclick="history.back()" aria-label="返回">‹</button>
+      <div class="navbar-title">我的举报记录</div>
+      <div style="width:34px;"></div>
+    </div>
+  </div>
+  <div id="list">${UI.loading()}</div>`;
+
+  const box = el.querySelector('#list');
+  try {
+    const list = await API.get('/reports/mine');
+    if (!list.length) {
+      box.innerHTML = UI.empty('shield', '暂无举报记录', '提交举报后可在这里查看处理进度');
+      return;
+    }
+    const targetName = { user: '用户', post: '搭局', comment: '评论', message: '消息' };
+    box.innerHTML = list.map((r) => {
+      const resolved = r.status === 'resolved';
+      return `
+      <div class="card rp-item">
+        <div class="rp-head">
+          <span class="rp-reason">${UI.icon('flag', 14)} ${UI.esc(r.reason || '其他')}</span>
+          <span class="pill ${resolved ? 'gray' : 'yellow'}">${resolved ? '已处理' : '处理中'}</span>
+        </div>
+        ${r.detail ? `<div class="rp-detail">${UI.esc(String(r.detail).slice(0, 80))}${String(r.detail).length > 80 ? '…' : ''}</div>` : ''}
+        <div class="rp-meta">举报对象：${targetName[r.target_type] || '内容'} #${r.target_id} · ${UI.timeAgo(r.created_at)}</div>
+      </div>`;
+    }).join('');
+  } catch (err) {
+    box.innerHTML = UI.empty('alert-circle', '加载失败', err.message);
+  }
+});
+
 /* ================= 安全中心 ================= */
 App.register('safety', async (el) => {
   const tips = await API.get('/safety/tips');
@@ -323,6 +360,7 @@ App.register('settings', async (el) => {
   <div style="margin:14px; border-radius:16px; overflow:hidden; box-shadow:var(--shadow);">
     <div class="cell"><span class="cell-icon">${UI.icon('smartphone', 18)}</span><span class="cell-main">账号</span><span style="color:var(--text-3); font-size:13px;">${UI.esc(me.id ? '用户 #' + me.id : '')}</span></div>
     <div class="cell" id="c-safety2"><span class="cell-icon">${UI.icon('shield', 18)}</span><span class="cell-main">安全中心</span><span class="cell-arrow">›</span></div>
+    <div class="cell" id="c-reports"><span class="cell-icon">${UI.icon('flag', 18)}</span><span class="cell-main">我的举报记录</span><span class="cell-arrow">›</span></div>
     <div class="cell" id="c-partners"><span class="cell-icon">${UI.icon('people', 18)}</span><span class="cell-main">我的搭友<span class="cell-sub">互评后自动沉淀的搭子关系</span></span><span class="cell-arrow">›</span></div>
     <div class="cell" id="c-blocks"><span class="cell-icon">${UI.icon('slash', 18)}</span><span class="cell-main">黑名单</span><span class="cell-arrow">›</span></div>
     <div class="cell" id="c-rec">
@@ -345,6 +383,7 @@ App.register('settings', async (el) => {
   </div>`;
 
   el.querySelector('#c-safety2').onclick = () => App.navigate('#/safety');
+  el.querySelector('#c-reports').onclick = () => App.navigate('#/my-reports');
   el.querySelector('#c-partners').onclick = () => App.navigate('#/partners');
 
   // 合规：个性化推荐开关（PUT /users/me rec_off，0=开启 1=关闭）

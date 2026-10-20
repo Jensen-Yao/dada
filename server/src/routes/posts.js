@@ -209,6 +209,19 @@ postsRouter.put('/:id', requireAuth, (req, res) => {
     const approved = db.prepare("SELECT COUNT(*) c FROM joins WHERE post_id = ? AND status = 'approved'").get(p.id).c;
     if (nc < approved) return res.status(400).json({ error: `已有 ${approved} 人通过，人数上限不能低于该数` });
     sets.push('need_count = ?'); vals.push(nc);
+    // C2（R3完整性）满员扩容闭环：满员帖扩容出空位 → 自动回到 open 继续招募，
+    // 并把此前被拒（含满员自动婉拒）的申请批量恢复为待审、逐一通知回流——
+    // 此前扩容后 status 仍是 'full'（新用户加入报"已停止招募"），被拒者也永远错过第二次机会。
+    const willCloseOrDone = body.status === 'closed' || body.status === 'done';
+    if (nc > approved && p.status === 'full' && !willCloseOrDone) {
+      if (body.status === undefined) { sets.push('status = ?'); vals.push('open'); } // status='open' 时由下方通用分支落库，避免重复 SET
+      const rejected = db.prepare("SELECT * FROM joins WHERE post_id = ? AND status = 'rejected'").all(p.id);
+      const t = now();
+      for (const rj of rejected) {
+        db.prepare("UPDATE joins SET status = 'pending', updated_at = ? WHERE id = ?").run(t, rj.id);
+        notify(rj.user_id, 'join_result', '搭局扩容了', `「${p.title}」扩容了，你的申请重新进入待审，请耐心等待组局者审核`, { post_id: p.id });
+      }
+    }
   }
   if (body.status !== undefined) {
     if (!['open', 'closed', 'done'].includes(body.status)) return res.status(400).json({ error: '状态不合法' });

@@ -37,6 +37,8 @@ App.register('login', async (el) => {
       <div class="form-item">
         <input id="f-pass" type="password" aria-label="密码" placeholder="密码（至少6位）" class="input" autocomplete="${mode === 'login' ? 'current-password' : 'new-password'}">
       </div>
+      ${mode === 'login' ? `
+      <div class="forgot-row"><button id="btn-forgot" type="button">忘记密码？</button></div>` : ''}
       <div class="form-item ${mode === 'login' ? 'hidden' : ''}" id="row-extra">
         <input id="f-nick" aria-label="昵称" placeholder="昵称" class="input">
         <div style="display:flex; gap:10px; margin-top:10px;">
@@ -124,6 +126,9 @@ App.register('login', async (el) => {
   }
 
   function bind() {
+    // C5：忘记密码入口（仅登录模式渲染，bind 会在模式切换后重跑）
+    $('btn-forgot') && ($('btn-forgot').onclick = openForgotSheet);
+
     // 获取验证码：调 sms/send；演示环境响应带 demo_code，直接 toast 呈现
     $('btn-sms') && ($('btn-sms').onclick = async () => {
       const btn = $('btn-sms');
@@ -185,4 +190,80 @@ App.register('login', async (el) => {
     $('btn-visit').onclick = () => App.navigate('#/square');
   }
   bind();
+
+  /* ---------- C5 忘记密码：手机号+验证码+新密码 → POST /auth/password/reset ----------
+   * 复用 sms/send（演示环境响应带 demo_code）；sheet 自带独立倒计时，
+   * 关闭时经 onClosed 清理定时器，不与注册表单的 smsTimer 互相干扰。 */
+  function openForgotSheet() {
+    let cdTimer = null;
+    const s = UI.sheet('找回密码', `
+      <div class="fp-tip">验证码将发送到你的注册手机号，重置成功后请用新密码登录</div>
+      <div class="input login-phone">
+        <span class="phone-prefix">+86</span>
+        <input id="fp-phone" type="tel" inputmode="numeric" maxlength="11" aria-label="手机号" placeholder="请输入注册手机号" autocomplete="tel-national">
+      </div>
+      <div class="input sms-field" style="margin-top:10px;">
+        <input id="fp-code" type="tel" inputmode="numeric" maxlength="6" aria-label="短信验证码" placeholder="短信验证码">
+        <button id="fp-sms" class="sms-btn" type="button">获取验证码</button>
+      </div>
+      <input id="fp-pass" type="password" aria-label="新密码" placeholder="新密码（至少6位）" class="input" style="margin-top:10px;" autocomplete="new-password">
+      <button class="btn primary block" id="fp-go" style="margin-top:14px;">重置密码</button>`, {
+      cancel: true,
+      onClosed: () => { if (cdTimer) { clearInterval(cdTimer); cdTimer = null; } },
+    });
+    const $fp = (id) => s.el.querySelector('#' + id);
+    // 登录框里已输入手机号时预填，少打一步
+    const account = $('f-user')?.value.trim() || '';
+    if (isPhone(account)) $fp('fp-phone').value = account;
+
+    $fp('fp-sms').onclick = async () => {
+      const btn = $fp('fp-sms');
+      const phone = $fp('fp-phone').value.trim();
+      if (!isPhone(phone)) return UI.toast('请输入正确的 11 位手机号');
+      btn.disabled = true;
+      btn.textContent = '发送中…';
+      try {
+        // BE 契约：scene='reset' 走找回密码通道（手机号必须已注册；与注册通道共用一次性验证码存储）
+        const r = await API.post('/auth/sms/send', { phone, scene: 'reset' });
+        if (r?.demo_code) UI.toast(`演示验证码: ${r.demo_code}`, 6000);
+        else UI.toast('验证码已发送，请注意查收');
+        let left = 60;
+        btn.textContent = `${left}s后重发`;
+        cdTimer = setInterval(() => {
+          left -= 1;
+          if (!btn.isConnected) { clearInterval(cdTimer); cdTimer = null; return; }
+          if (left <= 0) {
+            clearInterval(cdTimer); cdTimer = null;
+            btn.disabled = false;
+            btn.textContent = '获取验证码';
+            return;
+          }
+          btn.textContent = `${left}s后重发`;
+        }, 1000);
+      } catch (err) {
+        UI.toast(err.message);
+        btn.disabled = false;
+        btn.textContent = '获取验证码';
+      }
+    };
+
+    $fp('fp-go').onclick = async () => {
+      const btn = $fp('fp-go');
+      const phone = $fp('fp-phone').value.trim();
+      const code = $fp('fp-code').value.trim();
+      const password = $fp('fp-pass').value;
+      if (!isPhone(phone)) return UI.toast('请输入正确的 11 位手机号');
+      if (!code) return UI.toast('请输入短信验证码');
+      if (!password || password.length < 6) return UI.toast('密码至少 6 位');
+      btn.disabled = true;
+      try {
+        await API.post('/auth/password/reset', { phone, code, password });
+        s.close();
+        UI.toast('密码已重置，请用新密码登录');
+      } catch (err) {
+        UI.toast(err.message);
+        btn.disabled = false;
+      }
+    };
+  }
 });

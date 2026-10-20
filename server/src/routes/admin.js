@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db, now } from '../db.js';
-import { requireAuth, ok, warnUser, notify } from '../util.js';
+import { requireAuth, ok, warnUser, notify, addCredit } from '../util.js';
 
 export const adminRouter = Router();
 
@@ -106,8 +106,14 @@ adminRouter.post('/reports/:id/resolve', (req, res) => {
     } else if (r.target_type === 'message') {
       db.prepare("UPDATE messages SET content = '[该消息因违规已被撤回]' WHERE id = ?").run(r.target_id);
     }
+  } else if (action === 'dismiss' && r.target_type === 'user') {
+    // L3（R3法务）：举报不实驳回 → 返还此前"收到举报，等待核实"扣除的 20 搭力值。
+    // 此前驳回后 -20 永久沉淀，用户协议"经核实举报不实的返还"是系统里不存在的动作。
+    addCredit(r.target_id, 20, '举报不实，返还搭力值');
   }
-  db.prepare("UPDATE reports SET status = 'resolved' WHERE id = ?").run(r.id);
+  // C7（R3完整性）：留痕处理时间与动作，供举报人 /api/reports/mine 查询进度
+  db.prepare("UPDATE reports SET status = 'resolved', resolved_at = ?, resolve_action = ? WHERE id = ?")
+    .run(now(), action, r.id);
   notify(r.reporter_id, 'report_result', '举报已处理', `你举报的「${r.reason}」已被处理（${{ warn: '已警告对方', ban: '已封禁/下架', dismiss: '未发现违规' }[action]}）`, {});
   res.json(ok({ resolved: true, action }));
 });

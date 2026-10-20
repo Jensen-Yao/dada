@@ -58,6 +58,24 @@ App.register('user', async (el, seg) => {
       ${tallyTags(u.rating_tags).map(([t, n]) => `<span class="pill" style="margin:2px 4px 2px 0;">${UI.esc(t)} ×${n}</span>`).join('')}
     </div>` : ''}
 
+    ${u.open_posts?.length ? `
+    <div class="section-title">TA招募中的局</div>
+    <div style="margin-bottom:6px;">
+      ${u.open_posts.map((p) => `
+      <div class="op-card" data-op="${p.id}" role="link" tabindex="0" aria-label="${UI.esc(p.title)}，查看详情" onkeydown="if(event.key==='Enter')App.navigate('#/post/${p.id}')">
+        <div class="op-ico">${UI.catIcon(p.category, 20)}</div>
+        <div class="op-main">
+          <div class="op-title">${UI.esc(p.title)}</div>
+          <div class="op-meta">
+            <span class="pill green">招募中</span>
+            ${p.city ? `<span class="pill gray">${UI.icon('location', 11)} ${UI.esc(p.city)}</span>` : ''}
+            ${p.meet_time ? `<span class="pill gray">${UI.icon('clock', 11)} ${UI.esc(p.meet_time)}</span>` : ''}
+          </div>
+        </div>
+        <span class="op-arrow">›</span>
+      </div>`).join('')}
+    </div>` : ''}
+
     ${u.recent_done?.length ? `
     <div class="section-title">搭子履历</div>
     <div class="wf" style="padding-top:0;">
@@ -74,6 +92,11 @@ App.register('user', async (el, seg) => {
 
     el.querySelectorAll('.pin-card[data-id]').forEach((card) => {
       card.onclick = () => App.navigate('#/post/' + card.dataset.id);
+    });
+
+    // C9：TA招募中的局简版卡片 → 搭局详情
+    el.querySelectorAll('.op-card[data-op]').forEach((card) => {
+      card.onclick = () => App.navigate('#/post/' + card.dataset.op);
     });
 
     el.querySelector('#btn-more').onclick = () => {};

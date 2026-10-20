@@ -49,13 +49,20 @@ miscRouter.get('/recommend', optionalAuth, (req, res) => {
   const blockFilter = me
     ? 'AND p.user_id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = ? UNION SELECT blocker_id FROM blocks WHERE blocked_id = ?)'
     : '';
+  // P1-4（R3公平性）：性别限制局硬过滤——线下搭子的加入资格是硬约束而非偏好，
+  // 与我性别不符的局不该占推荐坑位（广场仍全量可见）。secret 用户视为未公开性别 → 只看不限性别。
+  const genderFilter = me
+    ? (me.gender === 'secret' ? "AND p.gender_req = 'any'" : "AND (p.gender_req = 'any' OR p.gender_req = ?)")
+    : '';
+  const genderVals = me && me.gender !== 'secret' ? [me.gender] : [];
   const rows = db.prepare(`
     SELECT p.* FROM posts p JOIN users u ON p.user_id = u.id
     WHERE p.status = 'open' AND u.status = 'active'
       AND (? IS NULL OR p.city = ?)
+      ${genderFilter}
       ${blockFilter}
     ORDER BY (p.likes_count + p.comments_count * 2) DESC, p.id DESC LIMIT 20
-  `).all(city || null, city || null, ...(me ? [me.id, me.id] : []));
+  `).all(city || null, city || null, ...genderVals, ...(me ? [me.id, me.id] : []));
   const viewer = me || null;
   const list = rows.map((p) => {
     const author = db.prepare('SELECT * FROM users WHERE id = ?').get(p.user_id);
@@ -98,12 +105,17 @@ miscRouter.get('/for-you', requireAuth, (req, res) => {
   // 50k open 帖实测单请求 8.7s，期间全站（HTTP/WS/心跳）冻结。取舍：更早的开放帖不再进入个性化
   // 排序（广场 feed 仍有全量分页兜底，且 >200 条之前的开放帖大概率已被 14 天过期任务回收），
   // 换取时延上限可预测（200 行 × 2 次点查 + 排序，毫秒级）。
+  // P1-4（R3公平性）：性别限制局硬过滤（与 /recommend 同一口径）——性别不符的局在候选池即剔除，
+  // 不再"可见但不可加入"地占用推荐坑位、让用户读到详情写完申请语才吃 403。
+  // secret（未公开性别）用户只看不限性别的局；广场 feed 不受影响。
+  const genderClause = me.gender === 'secret' ? "AND p.gender_req = 'any'" : "AND (p.gender_req = 'any' OR p.gender_req = ?)";
   const rows = db.prepare(`
     SELECT p.* FROM posts p JOIN users u ON p.user_id = u.id
     WHERE p.status = 'open' AND u.status = 'active' AND p.user_id != ?
+      ${genderClause}
       AND p.user_id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = ? UNION SELECT blocker_id FROM blocks WHERE blocked_id = ?)
     ORDER BY p.id DESC LIMIT 200
-  `).all(me.id, me.id, me.id);
+  `).all(me.id, ...(me.gender === 'secret' ? [] : [me.gender]), me.id, me.id);
 
   const getAuthor = db.prepare('SELECT * FROM users WHERE id = ?');
   const toView = (p, author, tagOverlap) => ({
@@ -184,3 +196,6 @@ miscRouter.get('/for-you', requireAuth, (req, res) => {
 
 // 挂载子路由
 miscRouter.use('/my/posts', myPostsRouter());
+// C7（R3完整性）：举报进度查询激活——reportRouter 此前是死代码（导入未挂载，GET /api/reports/mine 404）。
+// 现挂载到 /api/reports（含 POST / 通用举报入口 与 GET /mine 我的举报进度）。
+miscRouter.use('/reports', reportRouter(Router));

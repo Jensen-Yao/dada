@@ -49,7 +49,10 @@ App.register('post', async (el, seg) => {
       <div class="navbar-inner">
         <button class="navbar-btn" onclick="history.back()" aria-label="返回">${UI.icon('chevron-left', 22)}</button>
         <div class="navbar-title">${UI.esc(p.category_name)}搭局</div>
-        <button class="navbar-btn" id="btn-share" aria-label="分享">${UI.icon('share', 19)}</button>
+        <div style="display:flex; align-items:center; gap:2px;">
+          ${p.is_author && ['open', 'full'].includes(p.status) ? '<button class="navbar-btn nav-txt-btn" id="btn-edit" aria-label="编辑搭局">编辑</button>' : ''}
+          <button class="navbar-btn" id="btn-share" aria-label="分享">${UI.icon('share', 19)}</button>
+        </div>
       </div>
     </div>
 
@@ -200,6 +203,8 @@ App.register('post', async (el, seg) => {
       setTimeout(() => el.querySelector('#f-comment')?.focus(), 380);
     };
     el.querySelector('#btn-join').onclick = onJoin;
+    // C1：作者编辑入口（open/full 态，导航栏"编辑"）
+    el.querySelector('#btn-edit')?.addEventListener('click', () => openEditSheet(p));
     el.querySelector('#btn-comment')?.addEventListener('click', onComment);
     el.querySelector('#f-comment')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') onComment(); });
     el.querySelector('#btn-done')?.addEventListener('click', async () => {
@@ -211,6 +216,41 @@ App.register('post', async (el, seg) => {
         load();
       } catch (err) { UI.toast(err.message); }
     });
+  }
+
+  /* ---------- C1 编辑搭局（最小集：标题/时间/地点/人数） ----------
+   * 仅作者可见（open/full 态）；成功后整页 load() 刷新。
+   * 注意：调大人数时后端会把满员搭局自动重开为招募中，load() 后状态 pill 随之更新。 */
+  function openEditSheet(p) {
+    const s = UI.sheet('编辑搭局', `
+      <div class="form-item"><label for="ep-title">标题</label><input id="ep-title" class="input" maxlength="40" value="${UI.esc(p.title)}"></div>
+      <div class="form-item"><label for="ep-time">时间</label><input id="ep-time" class="input" maxlength="30" value="${UI.esc(p.meet_time || '')}" placeholder="如 本周六 18:30"></div>
+      <div class="form-item"><label for="ep-loc">地点</label><input id="ep-loc" class="input" maxlength="50" value="${UI.esc(p.location_name || '')}" placeholder="如 五道口 xx 火锅店"></div>
+      <div class="form-item"><label for="ep-need">成团人数</label><input id="ep-need" class="input" type="number" min="1" max="20" inputmode="numeric" value="${p.need_count}"><div class="ep-hint">已通过 ${p.approved_count} 人；调大人数后满员的搭局会自动重新开放招募</div></div>
+      <button class="btn primary block" id="ep-go" style="margin-top:6px;">保存修改</button>`, { cancel: true });
+    const go = s.el.querySelector('#ep-go');
+    go.onclick = async () => {
+      if (go.disabled) return;
+      const title = s.el.querySelector('#ep-title').value.trim();
+      const need = parseInt(s.el.querySelector('#ep-need').value, 10);
+      if (!title) return UI.toast('标题不能为空');
+      if (!need || need < 1) return UI.toast('人数至少 1 人');
+      go.disabled = true;
+      try {
+        await API.put(`/posts/${pid}`, {
+          title,
+          meet_time: s.el.querySelector('#ep-time').value.trim(),
+          location_name: s.el.querySelector('#ep-loc').value.trim(),
+          need_count: need,
+        });
+        s.close();
+        UI.toast('已更新');
+        load();
+      } catch (err) {
+        UI.toast(err.message);
+        go.disabled = false;
+      }
+    };
   }
 
   async function onJoin() {

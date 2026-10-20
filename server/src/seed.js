@@ -125,6 +125,30 @@ for (const [username, idx, text] of sampleComments) {
   db.prepare('UPDATE posts SET comments_count = comments_count + 1 WHERE id = ?').run(pid);
 }
 
+// ---------- 真实点赞数据（R3公平性 P1-3）----------
+// 此前 likes_count 为 0-19 随机数而 likes 表零行——新用户冷启动热门榜与广场热门排序由假数据驱动。
+// 现从用户池随机抽 min(N, 8) 个用户各插一行真实点赞，likes_count 落为真实行数，列表页数字与点赞行为一致。
+// 幂等：likes 主键 (user_id, post_id) + 已有行即整帖跳过，重跑不重复、计数不漂移。
+{
+  let likeRows = 0;
+  for (const [i, p] of allPosts.entries()) {
+    const pid = pidByIndex[i];
+    if (!pid) continue;
+    if (db.prepare('SELECT 1 FROM likes WHERE post_id = ? LIMIT 1').get(pid)) continue; // 幂等跳过
+    const authorId = uidByUsername[p[0]];
+    const want = Math.min(Math.floor(Math.random() * 20), 8); // 沿用原 0-19 分布意图，封顶 8（用户池规模所限）
+    const pool = Object.values(uidByUsername).filter((id) => id !== authorId).sort(() => Math.random() - 0.5);
+    for (const uid of pool.slice(0, want)) {
+      db.prepare('INSERT OR IGNORE INTO likes (user_id, post_id, created_at) VALUES (?,?,?)')
+        .run(uid, pid, t - Math.floor(Math.random() * 7 * 86400000));
+      likeRows++;
+    }
+    const actual = db.prepare('SELECT COUNT(*) c FROM likes WHERE post_id = ?').get(pid).c;
+    db.prepare('UPDATE posts SET likes_count = ? WHERE id = ?').run(actual, pid);
+  }
+  if (likeRows) console.log(`   点赞数据已对齐：likes 行与 likes_count 一致（新增 ${likeRows} 行）`);
+}
+
 // ---------- 演示会话：xiaoyu 与 meimei 围绕日料帖的邀约对话 ----------
 {
   const xiaoyuId = uidByUsername.xiaoyu;
