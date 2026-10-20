@@ -205,7 +205,9 @@ App.register('notifications', async (el) => {
       <button class="navbar-btn" id="btn-read-all" style="font-size:12px; width:auto; padding:0 8px;">全部已读</button>
     </div>
   </div>
-  <div id="list">${UI.loading()}</div>`;
+  <div id="list">${UI.loading()}</div>
+  <!-- R5[W1]：通知到达/加载完成的播报通道（视觉隐藏） -->
+  <div id="notif-live" class="visually-hidden" aria-live="polite"></div>`;
 
   // EM-05：10 类通知线性图标映射（G.4 表）
   const icons = { like: 'heart', comment: 'comment', join_request: 'user-plus', join_result: 'check-circle', rating: 'star', credit: 'zap', warning: 'alert-triangle', sos: 'phone-call', report_result: 'shield', post_done: 'check' };
@@ -213,8 +215,10 @@ App.register('notifications', async (el) => {
   async function load() {
     const list = await API.get('/notifications');
     const box = el.querySelector('#list');
+    const live = el.querySelector('#notif-live');
     if (!list.length) {
       box.innerHTML = UI.empty('bell', '没有通知', '申请、点赞、评价都会出现在这里');
+      if (live) live.textContent = '暂无通知';
       return;
     }
     box.innerHTML = list.map((n) => `
@@ -226,6 +230,8 @@ App.register('notifications', async (el) => {
           <div style="font-size:11px; color:var(--text-3); margin-top:2px;">${UI.timeAgo(n.created_at)}</div>
         </div>
       </div>`).join('');
+    // R5[W1]：加载完成后向 live 区写条数（含 SOS 等安全类通知，管理员同一入口）
+    if (live) live.textContent = `已加载 ${list.length} 条通知`;
     // 用户批评R1[搭子王#2]：带 post_id 的通知深链到帖子详情（申请/点赞/互评等可一步到达现场）；
     // credit/warning 等无 post_id 的通知保持不可点
     box.querySelectorAll('.notif-item').forEach((item) => {
@@ -360,6 +366,8 @@ App.register('settings', async (el) => {
   </div>
   <div style="margin:14px; border-radius:16px; overflow:hidden; box-shadow:var(--shadow);">
     <div class="cell"><span class="cell-icon">${UI.icon('smartphone', 18)}</span><span class="cell-main">账号</span><span style="color:var(--text-3); font-size:13px;">${UI.esc(me.id ? '用户 #' + me.id : '')}</span></div>
+    <!-- R5[W13]联动：运营后台入口按 /auth/me 的 is_admin 判定（BE 未返回 undefined 时隐藏，兼容旧后端） -->
+    ${me.is_admin ? `<div class="cell" id="c-admin"><span class="cell-icon">${UI.icon('bar-chart-2', 18)}</span><span class="cell-main">运营后台<span class="cell-sub">看板 · 举报队列 · 用户管理</span></span><span class="pill blue">管理员</span><span class="cell-arrow">›</span></div>` : ''}
     <div class="cell" id="c-safety2"><span class="cell-icon">${UI.icon('shield', 18)}</span><span class="cell-main">安全中心</span><span class="cell-arrow">›</span></div>
     <div class="cell" id="c-reports"><span class="cell-icon">${UI.icon('flag', 18)}</span><span class="cell-main">我的举报记录</span><span class="cell-arrow">›</span></div>
     <div class="cell" id="c-feedback"><span class="cell-icon">${UI.icon('edit', 18)}</span><span class="cell-main">意见反馈</span><span class="cell-arrow">›</span></div>
@@ -385,6 +393,7 @@ App.register('settings', async (el) => {
   </div>`;
 
   el.querySelector('#c-safety2').onclick = () => App.navigate('#/safety');
+  el.querySelector('#c-admin')?.addEventListener('click', () => App.navigate('#/admin'));
   el.querySelector('#c-reports').onclick = () => App.navigate('#/my-reports');
   el.querySelector('#c-partners').onclick = () => App.navigate('#/partners');
 

@@ -25,7 +25,8 @@ App.register('chat', async (el) => {
       <div class="conv-empty-pane" id="chat-empty">
         ${UI.empty('message-circle', '选择一个会话开始聊天', '在左侧列表中点击搭子，即可继续对话')}
       </div>
-    </div>`;
+    </div>
+    <div id="chat-live" class="visually-hidden" aria-live="polite"></div>`;
   } else {
     el.innerHTML = `
     <div class="navbar">
@@ -34,15 +35,22 @@ App.register('chat', async (el) => {
         <button class="navbar-btn" id="btn-notif" aria-label="通知">${UI.icon('bell', 20)}</button>
       </div>
     </div>
-    <div id="convs">${UI.loading()}</div>`;
+    <div id="convs">${UI.loading()}</div>
+    <div id="chat-live" class="visually-hidden" aria-live="polite"></div>`;
   }
 
   el.querySelector('#btn-notif').onclick = () => App.navigate('#/notifications');
 
   async function load() {
     const box = el.querySelector('#convs');
+    const live = el.querySelector('#chat-live');
     try {
       const list = await API.get('/chat/convs');
+      // R5[W1]：新消息到达（WS 触发 load）时未读变化经此 live 区播报
+      if (live) {
+        const unread = list.reduce((s, c) => s + (c.unread || 0), 0);
+        live.textContent = list.length ? `${unread > 0 ? `${unread} 条未读，` : ''}共 ${list.length} 个会话` : '暂无会话';
+      }
       if (!list.length) {
         box.innerHTML = UI.empty('message-circle', '还没有会话', '申请搭局通过后就能和组局者聊天');
         return;

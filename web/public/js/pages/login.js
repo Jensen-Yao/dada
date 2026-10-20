@@ -58,6 +58,8 @@ App.register('login', async (el) => {
         </label>
         <a href="#/legal/terms" class="adult-link">《用户协议》</a><a href="#/legal/privacy" class="adult-link">《隐私政策》</a>
       </div>` : ''}
+      <!-- R5[W4]：表单错误专用播报容器（role=alert），视觉隐藏；配合字段 aria-invalid -->
+      <div id="form-err" class="visually-hidden" role="alert"></div>
       <button class="btn primary block" id="btn-go">${mode === 'login' ? '登录' : '注册并开始找搭子'}</button>
       ${mode === 'login' ? `
       <div style="text-align:center; font-size:11.5px; color:var(--text-3); margin-top:8px;">登录即代表同意<a href="#/legal/terms" style="color:var(--primary-deep); font-weight:600; text-decoration:none;">《用户协议》</a>与<a href="#/legal/privacy" style="color:var(--primary-deep); font-weight:600; text-decoration:none;">《隐私政策》</a></div>` : ''}
@@ -77,6 +79,26 @@ App.register('login', async (el) => {
   el.innerHTML = html();
 
   const $ = (id) => el.querySelector('#' + id);
+
+  /* ---------- R5[W4]：字段级错误可播报 ----------
+   * toast（role=status）负责全局反馈；这里把具体错误同时写入提交按钮前的
+   * role=alert 容器 + 给出错字段挂 aria-invalid 并移焦过去，读屏用户
+   * 能知道"错在哪、该改哪个框"。重新输入即清除。模式切换/重渲 html() 后重建。 */
+  function fieldError(input, msg) {
+    if (input) {
+      input.setAttribute('aria-invalid', 'true');
+      try { input.focus(); } catch { /* ignore */ }
+    }
+    const box = $('form-err');
+    if (box) box.textContent = msg;
+    UI.toast(msg);
+  }
+  el.addEventListener('input', (e) => {
+    if (!e.target.matches('input, select, textarea')) return;
+    e.target.removeAttribute('aria-invalid');
+    const box = $('form-err');
+    if (box) box.textContent = '';
+  });
 
   // R2-N5: 表单草稿——点协议链接跳走后返回时恢复已输入内容（sessionStorage，关标签页即弃）
   const DRAFT_KEY = 'dada_login_draft';
@@ -133,7 +155,7 @@ App.register('login', async (el) => {
     $('btn-sms') && ($('btn-sms').onclick = async () => {
       const btn = $('btn-sms');
       const phone = $('f-phone').value.trim();
-      if (!isPhone(phone)) return UI.toast('请输入正确的 11 位手机号');
+      if (!isPhone(phone)) return fieldError($('f-phone'), '请输入正确的 11 位手机号');
       btn.disabled = true;
       btn.textContent = '发送中…';
       try {
@@ -157,19 +179,25 @@ App.register('login', async (el) => {
           // 合规：登录支持手机号或用户名（同一输入框），手机号优先走 phone 字段
           const account = $('f-user').value.trim();
           const password = $('f-pass').value;
-          if (!account || !password) { UI.toast('请填写账号和密码'); btn.disabled = false; return; }
+          if (!account || !password) {
+            btn.disabled = false;
+            return fieldError(!account ? $('f-user') : $('f-pass'), '请填写账号和密码');
+          }
           data = await API.post('/auth/login', isPhone(account) ? { phone: account, password } : { username: account, password });
         } else {
           const phone = $('f-phone').value.trim();
           const code = $('f-code').value.trim();
           const password = $('f-pass').value;
           const nickname = $('f-nick').value.trim();
-          if (!isPhone(phone)) { UI.toast('请输入正确的 11 位手机号'); btn.disabled = false; return; }
-          if (!code) { UI.toast('请输入短信验证码'); btn.disabled = false; return; }
-          if (!password || password.length < 6) { UI.toast('密码至少 6 位'); btn.disabled = false; return; }
-          if (!nickname) { UI.toast('请填写昵称'); btn.disabled = false; return; }
+          if (!isPhone(phone)) { btn.disabled = false; return fieldError($('f-phone'), '请输入正确的 11 位手机号'); }
+          if (!code) { btn.disabled = false; return fieldError($('f-code'), '请输入短信验证码'); }
+          if (!password || password.length < 6) { btn.disabled = false; return fieldError($('f-pass'), '密码至少 6 位'); }
+          if (!nickname) { btn.disabled = false; return fieldError($('f-nick'), '请填写昵称'); }
           // 合规：年龄确认未勾选前端拦截（未传 adult_confirmed BE 也会 400）
-          if (!$('f-adult').checked) { UI.toast('请先确认已满18周岁并同意《用户协议》《隐私政策》'); btn.disabled = false; return; }
+          if (!$('f-adult').checked) {
+            btn.disabled = false;
+            return fieldError($('f-adult'), '请先确认已满18周岁并同意《用户协议》《隐私政策》');
+          }
           data = await API.post('/auth/register', {
             phone, code, password, nickname, adult_confirmed: true,
             gender: $('f-gender').value, city: $('f-city').value.trim(),

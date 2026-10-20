@@ -146,9 +146,9 @@ App.register('conv', async (el, seg) => {
         <button class="navbar-btn" id="btn-more" aria-label="更多">${ic('more', 20) || '···'}</button>
       </div>
     </div>
-    <div class="chat-scroll" id="msgs" style="flex:1; overflow-y:auto;"></div>
+    <div class="chat-scroll" id="msgs" role="log" aria-live="polite" aria-label="聊天消息" style="flex:1; overflow-y:auto;"></div>
     <div class="chat-input-bar">
-      <input id="f-msg" placeholder="友善聊天，禁止导流与违规内容…" maxlength="2000">
+      <input id="f-msg" aria-label="聊天消息" placeholder="友善聊天，禁止导流与违规内容…" maxlength="2000">
       <button class="btn primary sm chat-send-btn" id="btn-send" aria-label="发送">${ic('send', 17) || '发送'}</button>
     </div>`;
 
@@ -195,6 +195,19 @@ App.register('conv', async (el, seg) => {
   }
 
   el.querySelector('#btn-back').onclick = () => history.back();
+
+  /* ---------- R5 时间语义 TS-4：聊天气泡流日期分隔条 ----------
+   * 相邻消息跨天（按设备本地日历日）时插入"今天 / 昨天 / M月D日"分隔，
+   * 消除"昨天的 21:00 与 5 分钟前的 21:00 视觉相同"的时间失真。 */
+  const dividerHTML = (ts) => `<div class="chat-day-divider" role="separator" aria-label="${UI.esc(UI.dayLabel(ts))}">${UI.esc(UI.dayLabel(ts))}</div>`;
+  let lastDayKey = ''; // 消息流中最后一条消息的日历日键（WS 增量插入时判断是否跨天）
+
+  function withDayDivider(m) {
+    const k = UI.dayKey(m.created_at);
+    if (k === lastDayKey) return msgHTML(m);
+    lastDayKey = k;
+    return dividerHTML(m.created_at) + msgHTML(m);
+  }
 
   function msgHTML(m) {
     if (m.type === 'safety') {
@@ -276,8 +289,14 @@ App.register('conv', async (el, seg) => {
       ${other?.verify_student ? '<span class="vbadge real">学生</span>' : ''}`;
     // 空会话（≤1 条）且有关联上下文 → 消息区顶部渲染破冰话题卡
     const topics = msgCount <= 1 && convContext ? topicCardsHTML() : '';
-    const bodyHTML = data.messages.map(msgHTML).join('');
+    // R5[W1]：#msgs 是 aria-live 区，历史消息全量渲染属"批量回放"而非新事件——
+    // 渲染前临时静音 live 通道，插完恢复 polite，避免读屏把整段历史复读一遍；
+    // 之后经 WS 增量插入的新消息走 live 播报。
+    msgsEl.setAttribute('aria-live', 'off');
+    lastDayKey = '';
+    const bodyHTML = data.messages.map(withDayDivider).join('');
     msgsEl.innerHTML = topics + (bodyHTML || (topics ? '' : UI.empty('message-circle', '打个招呼', '聊聊具体安排，认识一下吧')));
+    msgsEl.setAttribute('aria-live', 'polite');
     bindTopics();
     paintReadReceipt(); // VD-07：历史消息 read_at 兜底渲染
     scrollBottom();
@@ -320,7 +339,8 @@ App.register('conv', async (el, seg) => {
   const onMsg = (payload) => {
     if (payload.message?.conv_id !== currentConvId) return;
     const nearBottom = msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 120;
-    msgsEl.insertAdjacentHTML('beforeend', msgHTML(payload.message));
+    // TS-4：跨天的新消息先插日期分隔条（#msgs 为 live 区，分隔条随消息一起播报）
+    msgsEl.insertAdjacentHTML('beforeend', withDayDivider(payload.message));
     msgCount += 1;
     if (msgCount > 1) dropTopics(); // 有人开口后话题卡沉底（VD-05）
     paintReadReceipt();             // 新消息成为"我的最后一条"，重算已读位（VD-07）

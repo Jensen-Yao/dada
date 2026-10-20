@@ -152,7 +152,7 @@ App.register('discover', async (el) => {
   paintChips();
   // 城市开放局数（open+full 聚合，接口失败静默）
   API.get('/cities').then((rows) => {
-    rows.forEach((r) => { cityCounts[r.city] = r.c; });
+    rows.forEach((r) => { cityCounts[r.city] = r.count; });
     paintCityCount();
   }).catch(() => {});
 
@@ -167,7 +167,7 @@ App.register('discover', async (el) => {
       <div class="ob-sub">选择你的兴趣和常驻城市，搭搭会为你精准匹配搭子</div>
       <div class="ob-tags">${ONBOARD_TAGS.map((t) => `<span class="tag" data-t="${t}">${t}</span>`).join('')}</div>
       <div class="form-item" style="margin-top:14px;">
-        <label>常驻城市</label>
+        <label for="ob-city">常驻城市</label>
         <input id="ob-city" class="input" maxlength="12" placeholder="如 北京" value="${UI.esc(defaultCity || '')}">
       </div>
       <button class="btn primary block" id="ob-done">完成</button>

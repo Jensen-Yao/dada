@@ -53,6 +53,13 @@ api.use('/safety', safetyRouter);
 api.use('/', miscRouter);
 app.use('/api', api);
 
+// [API-2] 未匹配的 /api/* 返回 JSON 404：此前 SPA fallback 正则把 /api 排除后无人接盘，
+// 落到 Express 默认 HTML 404，第三方 JSON.parse 直接失败、无法区分"路径写错"与"资源不存在"。
+// 位置约束：必须挂在全部 api 子路由之后、SPA catchall 之前。
+app.use('/api', (_req, res) => {
+  res.status(404).json({ error: '接口不存在' });
+});
+
 // SPA fallback（除 /api 与 /uploads 外全部回退到 index.html）
 if (fs.existsSync(path.join(WEB_DIR, 'index.html'))) {
   app.get(/^(?!\/api|\/uploads).*/, (_req, res) => {

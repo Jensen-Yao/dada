@@ -62,6 +62,7 @@
 
 ### 产品缺陷与技术债
 - [x] ~~审批通过后无UI入口创建会话~~（已修：approve自动getOrCreateConv + "去聊天"直达 /#/conv/:id）
+- [x] ~~备份链路：deploy.sh 运行中 tar 数据卷~~（R5 已修：tar 为非原子多文件拷贝，实测 WAL 丢失即静默回退 checkpoint 点且校验全绿；改为 SQLite 在线备份——宿主机 sqlite3 .backup / 容器内 node VACUUM INTO 兜底 + integrity_check 与行数抽样校验，详见 deploy/deploy.sh）
 - [ ] conv.js/chat.js 的 DOMNodeRemoved 弃用事件迁移到 MutationObserver（QA P3）
 - [ ] Docker部署：uploads路径硬编码建议改为环境变量（当前用镜像内软链绕开）
 - [ ] 公网部署安全：强制改 DADA_JWT_SECRET、禁 production seed（admin/123456 弱口令风险）

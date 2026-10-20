@@ -18,6 +18,25 @@ App.register('post', async (el, seg) => {
     return `<span class="pill ${cls}">${text}</span>`;
   }
 
+  /* ---------- R5 时间语义（review-time-r5 TS-5）：meet_at 倒计时 ----------
+   * meet_at 存在且未来 → "还有X天X小时开始"（纯文本，R4 已去 emoji）；
+   * 已过 24h → "该搭局时间已过"；过去 24h 内（进行中/刚散场缓冲期）→ 不附加倒计时。
+   * meet_at 为空（老帖/BE 未返回）→ 恒回退 meet_time 原文，零影响。 */
+  function meetLine(p) {
+    const base = UI.meetText(p) || UI.esc(p.meet_time || '');
+    if (!base) return '';
+    if (!p.meet_at) return base;
+    const diff = p.meet_at - Date.now();
+    if (diff > 0) {
+      const h = Math.floor(diff / 3600000);
+      const d = Math.floor(h / 24);
+      const cd = d >= 1 ? `还有${d}天${h % 24}小时开始` : (h >= 1 ? `还有${h}小时开始` : '即将开始');
+      return `${base} · ${cd}`;
+    }
+    if (-diff > 24 * 3600000) return `${base} · 该搭局时间已过`;
+    return base;
+  }
+
   async function load() {
     post = await API.get(`/posts/${pid}`);
     me = API.isLogin() ? await API.get('/auth/me').catch(() => null) : null;
@@ -65,7 +84,7 @@ App.register('post', async (el, seg) => {
       ${p.content ? `<div style="margin-top:12px; font-size:var(--fs-md); line-height:1.7; color:var(--text); white-space:pre-wrap;">${UI.esc(p.content)}</div>` : ''}
       <div style="margin-top:14px; padding-top:12px; border-top:0.5px solid var(--line);">
         ${metaRow(UI.icon('location', 15), `${UI.esc(p.city)}${p.location_name ? ' · ' + UI.esc(p.location_name) : ''}`)}
-        ${p.meet_time ? metaRow(UI.icon('clock', 15), UI.esc(p.meet_time)) : ''}
+        ${p.meet_time || p.meet_at ? metaRow(UI.icon('clock', 15), meetLine(p)) : ''}
         ${metaRow(UI.icon('people', 15), `已通过 ${p.approved_count} / ${p.need_count} 人${p.status === 'open' ? `，还缺 ${Math.max(0, p.need_count - p.approved_count)} 人` : ''}`)}
         ${p.requirements ? metaRow(UI.icon('edit', 15), UI.esc(p.requirements)) : ''}
         ${metaRow(UI.icon('eye', 15), `${p.views_count} 次浏览 · ${UI.timeAgo(p.created_at)}发布`)}
@@ -90,7 +109,7 @@ App.register('post', async (el, seg) => {
     ${API.isLogin() ? `
     <div style="padding:0 14px 20px;">
       <div style="display:flex; gap:8px;">
-        <input id="f-comment" class="input" placeholder="友善发言，共同维护搭子氛围…" style="flex:1;">
+        <input id="f-comment" class="input" aria-label="写评论" placeholder="友善发言，共同维护搭子氛围…" style="flex:1;">
         <button class="btn primary sm" id="btn-comment">发送</button>
       </div>
     </div>` : ''}

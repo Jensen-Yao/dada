@@ -5,22 +5,38 @@ import { db, now } from './db.js';
 import { notify } from './util.js';
 
 const INTERVAL_MS = 10 * 60 * 1000;           // 每 10 分钟一轮
-const EXPIRE_DAYS = 14;                        // open 帖发布超 14 天未成行 → expired
+const EXPIRE_DAYS = 14;                        // open 帖（无 meet_at）发布超 14 天未成行 → expired
+const MEET_GRACE_MS = 24 * 3600_000;           // 有 meet_at 的局：活动时间过后 24h 才过期（缓冲容纳拖堂）
 const RATE_REMIND_HOURS = 72;                  // done 超 72h 仍未互评 → 提醒（互评是信用飞轮入口）
 const PARTNER_PUSH_WINDOW_MS = 24 * 3600_000;  // 老搭子推送只扫近 24h 新帖（events 防重天然幂等）
 const PARTNER_PUSH_DAILY_CAP = 2;              // 每接收者每日 ≤2 条，防打扰（规格 VD-02-3）
 const EVENTS_TTL_DAYS = 90;                    // events 保留 90 天（A8：埋点表按浏览量线性膨胀，无上限）
 
-// ① 搭局自动过期：僵尸 open 帖让供给新鲜度失真 → 置 expired 并通知组局者
+// ① 搭局自动过期（TS-2 双轨，R5时间语义）：过期语义此前只看 created_at+14d、与活动时间完全脱钩——
+// 实测 24 条 open 帖 4 成"活动已散场还在收申请"，而长期局（每周六/每天）14 天被误杀。
+// 现改为：有 meet_at 无 repeat → meet_at+24h 过期；有 repeat（周期局）→ 永不过期；无 meet_at → 维持 14 天。
 function jobExpirePosts() {
-  const rows = db.prepare("SELECT * FROM posts WHERE status = 'open' AND created_at < ?")
-    .all(now() - EXPIRE_DAYS * 86400000);
-  for (const p of rows) {
+  const t = now();
+  const trackA = db.prepare(`
+    SELECT * FROM posts WHERE status = 'open'
+      AND meet_at IS NOT NULL AND (meet_repeat IS NULL OR meet_repeat = '')
+      AND meet_at < ?
+  `).all(t - MEET_GRACE_MS);
+  const trackB = db.prepare(`
+    SELECT * FROM posts WHERE status = 'open'
+      AND meet_at IS NULL AND (meet_repeat IS NULL OR meet_repeat = '')
+      AND created_at < ?
+  `).all(t - EXPIRE_DAYS * 86400000);
+  const expired = [];
+  for (const [p, body] of [
+    ...trackA.map((r) => [r, `「${r.title}」活动时间已过（超过 24 小时）仍未成行，已自动关闭。可重新发布，或若已完成请标记为已完成。`]),
+    ...trackB.map((r) => [r, `「${r.title}」发布超过 ${EXPIRE_DAYS} 天仍未成行，已自动关闭。可重新发布，或若已完成请标记为已完成。`]),
+  ]) {
     db.prepare("UPDATE posts SET status = 'expired' WHERE id = ? AND status = 'open'").run(p.id);
-    notify(p.user_id, 'post_expired', '搭局已过期',
-      `「${p.title}」发布超过 ${EXPIRE_DAYS} 天仍未成行，已自动关闭。可重新发布，或若已完成请标记为已完成。`, { post_id: p.id });
+    notify(p.user_id, 'post_expired', '搭局已过期', body, { post_id: p.id });
+    expired.push(p.id);
   }
-  return rows.length;
+  return expired.length;
 }
 
 // ② 搭后互评提醒：done 超 72h 仍有参与者未互评 → notify 一次
@@ -103,17 +119,32 @@ function jobCleanEvents() {
   return db.prepare('DELETE FROM events WHERE created_at < ?').run(now() - EVENTS_TTL_DAYS * 86400000).changes;
 }
 
+// ⑤ [D-P1] WAL 定期 checkpoint（R5-DBA P1-5）：服务进程永不关闭连接 → node:sqlite 只在干净
+// 关闭时自动 checkpoint，WAL 无限增长（实测真实库 93% 数据悬在 2.29MB 的 WAL 里）——既让
+// "只拷主文件"的备份几乎等于空壳，也不断拉长崩溃回放窗口。每日 TRUNCATE 一次：WAL 合并回
+// 主文件并截断为 0，缩备份/崩溃窗口，备份链路（deploy.sh）因此可用一致快照。
+let lastCheckpointDay = 0;
+function jobWalCheckpoint() {
+  const day = Math.floor(now() / 86400000);
+  if (day === lastCheckpointDay) return false; // 每天一轮即可
+  lastCheckpointDay = day;
+  db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
+  return true;
+}
+
 // 单轮执行（导出供测试与手动触发）；返回各任务结果摘要
 export function runJobs() {
   let expired = 0;
   let reminded = [];
   let pushed = 0;
   let cleaned = 0;
+  let checkpoint = false;
   try { expired = jobExpirePosts(); } catch (e) { console.error('[dada] jobs 过期任务失败:', e.message); }
   try { reminded = jobRateReminders(); } catch (e) { console.error('[dada] jobs 互评提醒任务失败:', e.message); }
   try { pushed = jobPartnerPush(); } catch (e) { console.error('[dada] jobs 老搭子推送任务失败:', e.message); }
   try { cleaned = jobCleanEvents(); } catch (e) { console.error('[dada] jobs events清理任务失败:', e.message); }
-  return { expired, reminded, pushed, cleaned };
+  try { checkpoint = jobWalCheckpoint(); } catch (e) { console.error('[dada] jobs WAL checkpoint 失败:', e.message); }
+  return { expired, reminded, pushed, cleaned, checkpoint };
 }
 
 let timer = null;
@@ -123,5 +154,5 @@ export function startJobs() {
     try { runJobs(); } catch { /* 双保险：绝不向进程冒泡 */ }
   }, INTERVAL_MS);
   timer.unref(); // 不阻止进程退出
-  console.log('[dada] 定时任务已启动（每 10 分钟：搭局过期 / 互评提醒 / 老搭子推送；每日：events 90天清理）');
+  console.log('[dada] 定时任务已启动（每 10 分钟：搭局过期 / 互评提醒 / 老搭子推送；每日：events 90天清理 + WAL checkpoint）');
 }

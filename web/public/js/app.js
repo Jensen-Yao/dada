@@ -130,6 +130,27 @@ const App = (() => {
 
   const NOT_FOUND_RE = /不存在|无权|已删除|已注销/;
 
+  /* ---------- R5[W2]：路由切换后的焦点与页面标题 ----------
+   * 实测 render() 只替换 DOM，焦点丢失到 BODY——读屏用户每次跳页都失去位置。
+   * 统一口径：渲染完成后聚焦页面主标题（优先 h1/h2，兜底 .navbar-title，
+   * 再兜底 .page 容器），focus({preventScroll}) 不扰动移动端滚动位置；
+   * 标题挂 tabindex="-1" 使其可编程聚焦但不进 Tab 序。
+   * 取舍：不做"来源焦点栈"还原（返回时也聚焦标题）——各页跳转出口多元
+   * （卡片点击/按钮/系统返回键/手势），维护栈易漏且内存泄漏面大；
+   * 聚焦标题已保证"每次导航都有页面级播报+已知落点"，是复杂度最低的正确解。 */
+  function focusPageTitle(el) {
+    const target = el.querySelector('h1, h2, .navbar-title') || el;
+    if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
+    try { target.focus({ preventScroll: true }); } catch { target.focus(); }
+  }
+
+  const PAGE_TITLES = {
+    square: '广场', discover: '发现', publish: '发布搭局', chat: '消息', conv: '聊天', me: '我的',
+    login: '登录', post: '搭局详情', 'edit-profile': '编辑资料', myposts: '我的搭局', ratings: '收到的评价',
+    notifications: '通知', settings: '设置', safety: '安全中心', partners: '我的搭友', admin: '运营后台',
+    'my-reports': '我的举报记录', user: '搭友主页', legal: '协议与政策',
+  };
+
   /* 用户批评R1[小林#1]：注册引导只挂在发现页，落地广场的新用户永远看不到 →
    * 全局兜底：登录态 + 待引导（dada_need_onboard==='1'）+ 未处理过（无 dada_onboarded）
    * + 当前不在发现页 → 5 秒后跳 #/discover（引导 sheet 逻辑仍在 discover，触发时再校验标记）。
@@ -189,6 +210,10 @@ const App = (() => {
       if (NOT_FOUND_RE.test(msg)) notFound(el, { sub: msg });
       else el.innerHTML = UI.empty('alert-circle', '页面出错了', msg || '请稍后再试');
     }
+    // R5[W2]：页面渲染完成后再移焦/改名——route 内部多为 await 异步渲染，
+    // 过早聚焦会被随后的 innerHTML 覆盖冲掉
+    focusPageTitle(el);
+    document.title = `${PAGE_TITLES[page] || '搭搭'} · 搭搭`;
     refreshBadges();
   }
 

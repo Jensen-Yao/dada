@@ -197,7 +197,7 @@ App.register('square', async (el, _seg, query) => {
           ${all.map((c) => `<button class="btn plain sm" data-city="${UI.esc(c)}" ${c === state.city ? 'style="border:1.5px solid var(--primary); color:var(--primary-deep); font-weight:700;"' : ''}>${UI.esc(c)}</button>`).join('')}
         </div>
         <div style="margin-top:12px;">
-          <input id="f-city-custom" class="input" placeholder="手动输入其他城市">
+          <input id="f-city-custom" class="input" aria-label="手动输入城市名" placeholder="手动输入其他城市">
           <button class="btn ghost block sm" id="btn-city-custom" style="margin-top:8px;">确定</button>
         </div>`;
       s.el.querySelectorAll('[data-city]').forEach((b) => {

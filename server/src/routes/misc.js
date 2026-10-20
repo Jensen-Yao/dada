@@ -19,8 +19,9 @@ miscRouter.get('/meta', (_req, res) => {
 
 // ---------- 城市列表（从帖子聚合） ----------
 miscRouter.get('/cities', (_req, res) => {
-  const rows = db.prepare("SELECT city, COUNT(*) c FROM posts WHERE status IN ('open','full') GROUP BY city ORDER BY c DESC LIMIT 50").all();
-  res.json(ok(rows));
+  // [API-8] 字段白名单：此前 SQL `COUNT(*) c` 别名原样透出（未文档化、语义不明），现归一为 {city, count}
+  const rows = db.prepare("SELECT city, COUNT(*) AS n FROM posts WHERE status IN ('open','full') GROUP BY city ORDER BY n DESC LIMIT 50").all();
+  res.json(ok(rows.map((r) => ({ city: r.city, count: r.n }))));
 });
 
 // ---------- 通知 ----------

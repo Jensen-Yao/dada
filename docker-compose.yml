@@ -11,9 +11,8 @@
 #   ⚠️ 演示数据含弱密码与 admin 账号，公网部署前请勿执行，或灌入后立即改密
 #
 # 升级：git pull && docker compose up -d --build   （数据在卷中不受影响）
-# 备份：见 README「部署」章节，或
-#   docker compose exec app tar czf /tmp/dada-data.tgz -C /data . \
-#     && docker compose cp app:/tmp/dada-data.tgz ./dada-data-backup.tgz
+# 备份：运行 tar 直接拷贝 SQLite 在 WAL 模式下会静默丢数据（R5演练证实），
+#   务必用 deploy/deploy.sh（VACUUM INTO 原子快照 + 校验），详见 README「部署」章节。
 # =====================================================================
 
 services:

@@ -84,6 +84,10 @@ function postView(p, viewer) {
     city: p.city,
     location_name: p.location_name,
     meet_time: p.meet_time,
+    // TS-1①（R5时间语义）结构化时间透传：meet_at=epoch ms UTC（可空）、meet_repeat=周期局标记。
+    // 前端有 meet_at 时格式化为本地墙钟，无则回退 meet_time 原文——老帖零影响
+    meet_at: p.meet_at ?? null,
+    meet_repeat: p.meet_repeat ?? null,
     need_count: p.need_count,
     fee_mode: p.fee_mode,
     fee_mode_name: FEE_MODES[p.fee_mode],
@@ -134,6 +138,41 @@ postsRouter.get('/', optionalAuth, (req, res) => {
   res.json(ok({ list: rows.map((r) => postView(r, req.user)), total, page: p, size: s, has_more: off + rows.length < total }));
 });
 
+// ---------- meet_at 结构化校验（TS-1②，R5时间语义） ----------
+// meet_at：epoch ms UTC；可空；提供时必须为数字且在 now+5min ~ now+365d 之间。
+// 周期局（repeat='weekly'|'daily'）豁免"未来"校验——长期帖的锚点时间可以是过去（如"每周六 07:00"）。
+const MEET_REPEATS = ['weekly', 'daily'];
+const MEET_MIN_LEAD_MS = 5 * 60_000;        // 最早可约：5 分钟后
+const MEET_MAX_LEAD_MS = 365 * 86400000;    // 最远可约：一年内
+const MEET_ERR = '开始时间需在5分钟到一年之内';
+
+// 解析请求体里的 meet_at/meet_repeat；返回 { meet_at, meet_repeat } 或 { error }
+export function parseMeetAt(body, current = {}) {
+  const t = now();
+  let meetAt = null;
+  let meetRepeat = current.meet_repeat || null;
+  const rawAt = body.meet_at;
+  if (rawAt !== undefined && rawAt !== null && rawAt !== '') {
+    const n = Number(rawAt);
+    if (!Number.isFinite(n) || n <= 0) return { error: MEET_ERR };
+    const rawRepeat = body.meet_repeat !== undefined ? body.meet_repeat : current.meet_repeat;
+    if (rawRepeat != null && rawRepeat !== '' && !MEET_REPEATS.includes(rawRepeat)) {
+      return { error: '重复规则不合法（仅支持 weekly/daily）' };
+    }
+    meetRepeat = MEET_REPEATS.includes(rawRepeat) ? rawRepeat : null;
+    if (!meetRepeat && (n < t + MEET_MIN_LEAD_MS || n > t + MEET_MAX_LEAD_MS)) {
+      return { error: MEET_ERR }; // 非周期局才要求"未来"——周期局豁免（长期帖）
+    }
+    meetAt = Math.round(n);
+  } else if (body.meet_repeat !== undefined) {
+    if (body.meet_repeat !== null && body.meet_repeat !== '' && !MEET_REPEATS.includes(body.meet_repeat)) {
+      return { error: '重复规则不合法（仅支持 weekly/daily）' };
+    }
+    meetRepeat = MEET_REPEATS.includes(body.meet_repeat) ? body.meet_repeat : null;
+  }
+  return { meet_at: meetAt, meet_repeat: meetRepeat };
+}
+
 // ---------- 发布搭局 ----------
 postsRouter.post('/', requireAuth, (req, res) => {
   const u = req.user;
@@ -162,6 +201,10 @@ postsRouter.post('/', requireAuth, (req, res) => {
   const fm = ['free', 'aa', 'treat'].includes(fee_mode) ? fee_mode : 'aa';
   if (!['any', 'female', 'male'].includes(gender_req || 'any')) return res.status(400).json({ error: '性别要求不合法' });
 
+  // TS-1②：meet_at 结构化时间（可空，NULL 时行为与旧版完全一致）
+  const meet = parseMeetAt(req.body || {});
+  if (meet.error) return res.status(400).json({ error: meet.error });
+
   // 幂等护栏（H16）：同用户短窗口内同标题+同内容的重复提交（多 tab / 网络重试）只落一帖，直接返回已有帖。
   // SQLite 同步执行 + 单进程事件循环，检查与插入之间无 await，天然无并发竞态。
   const dup = db.prepare(`
@@ -171,10 +214,10 @@ postsRouter.post('/', requireAuth, (req, res) => {
   if (dup) return res.json(ok(postView(dup, u)));
 
   const info = db.prepare(`
-    INSERT INTO posts (user_id, category, title, content, city, location_name, meet_time, need_count, fee_mode, gender_req, requirements, status, created_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,'open',?)
+    INSERT INTO posts (user_id, category, title, content, city, location_name, meet_time, meet_at, meet_repeat, need_count, fee_mode, gender_req, requirements, status, created_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'open',?)
   `).run(u.id, category, fTitle.cleaned, fContent.cleaned, cityS,
-    fLoc.cleaned.slice(0, 50), String(meet_time || '').slice(0, 30), nc, fm, gender_req || 'any', fReq.cleaned, now());
+    fLoc.cleaned.slice(0, 50), String(meet_time || '').slice(0, 30), meet.meet_at, meet.meet_repeat, nc, fm, gender_req || 'any', fReq.cleaned, now());
   db.prepare('UPDATE users SET last_active_at = ? WHERE id = ?').run(now(), u.id);
   const p = db.prepare('SELECT * FROM posts WHERE id = ?').get(info.lastInsertRowid);
   trackEvent(u.id, 'publish', p.id); // VD-01 漏斗：发布
@@ -203,8 +246,17 @@ postsRouter.put('/:id', requireAuth, (req, res) => {
     if (body[f] === undefined) continue;
     const filtered = filterContent(String(body[f] || ''));
     if (filtered.hits.length) return res.status(400).json({ error: '内容包含违规信息，请修改' });
+    // TS-1②：长度上限与创建路径对齐（此前编辑 meet_time/location_name 用 1000 上限，与创建的 30/50 自相矛盾）
+    const max = f === 'title' ? 40 : f === 'meet_time' ? 30 : f === 'location_name' ? 50 : 1000;
     sets.push(`${f} = ?`);
-    vals.push(filtered.cleaned.slice(0, f === 'title' ? 40 : 1000));
+    vals.push(filtered.cleaned.slice(0, max));
+  }
+  // TS-1②：meet_at / meet_repeat 编辑（undefined=不改；null/''=清空；提供时同创建校验）
+  if (body.meet_at !== undefined || body.meet_repeat !== undefined) {
+    const meet = parseMeetAt(body, { meet_repeat: p.meet_repeat });
+    if (meet.error) return res.status(400).json({ error: meet.error });
+    if (body.meet_at !== undefined) { sets.push('meet_at = ?'); vals.push(meet.meet_at); }
+    if (body.meet_repeat !== undefined) { sets.push('meet_repeat = ?'); vals.push(meet.meet_repeat); }
   }
   if (body.need_count !== undefined) {
     const nc = Math.min(20, Math.max(1, parseInt(body.need_count) || 1));
@@ -306,6 +358,11 @@ postsRouter.post('/:id/join', requireAuth, (req, res) => {
   if (anyBlocked(req.user.id, p.user_id)) return res.status(403).json({ error: '无法与该用户互动' });
   if (p.status !== 'open') return res.status(400).json({ error: '该搭局已停止招募' });
   if (p.user_id === req.user.id) return res.status(400).json({ error: '不能加入自己发布的搭局' });
+  // TS-2③（R5时间语义）入口时间守卫：meet_at 已过 24h 的 open 局不再收新申请（活动已散场，
+  // 组局者永不再审核 → 申请悬置）。不必等 jobs 扫描（10 分钟粒度），即刻拦截；周期局不受限。
+  if (p.meet_at && !p.meet_repeat && now() > p.meet_at + 24 * 3600_000) {
+    return res.status(400).json({ error: '该搭局时间已过' });
+  }
   const exist = db.prepare('SELECT * FROM joins WHERE post_id = ? AND user_id = ?').get(p.id, req.user.id);
   // rejected / quit 可重新申请（退出通道不是单行道）；pending/approved 不可重复申请
   if (exist && exist.status !== 'rejected' && exist.status !== 'quit') return res.status(400).json({ error: '已申请过该搭局' });

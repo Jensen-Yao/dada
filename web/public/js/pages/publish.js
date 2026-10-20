@@ -59,8 +59,22 @@ App.register('publish', async (el, _seg, query) => {
     </div>
 
     <div class="form-item">
-      <label for="f-time">时间</label>
-      <input id="f-time" class="input" maxlength="30" placeholder="如：本周六 11:30">
+      <label for="f-time">时间说明</label>
+      <input id="f-time" class="input" maxlength="30" placeholder="如：本周六 11:30（文字描述即可）">
+    </div>
+
+    <div class="form-item">
+      <label for="f-date">具体开始时间（选填）</label>
+      <div class="meet-row">
+        <input id="f-date" class="input" type="date" aria-label="开始日期">
+        <input id="f-time2" class="input" type="time" aria-label="开始时间">
+        <select id="f-repeat" class="select" aria-label="重复周期">
+          <option value="once">不重复</option>
+          <option value="weekly">每周</option>
+          <option value="daily">每天</option>
+        </select>
+      </div>
+      <div class="meet-hint">填写后搭子会看到结构化日期与开始倒计时；留空则只展示上面的文字时间</div>
     </div>
 
     <div class="form-item">
@@ -103,12 +117,34 @@ App.register('publish', async (el, _seg, query) => {
     </div>
 
     <button class="btn primary block pub-cta" id="btn-publish">发布搭局</button>
+    <!-- R5[W4]：表单错误专用播报容器（role=alert 立即打断播报），视觉隐藏不与 toast 重复占位 -->
+    <div id="pub-err" class="visually-hidden" role="alert"></div>
     <div class="pub-foot-note">
       发布需搭力值 ≥ 300 · 你当前 ${me?.credit ?? '—'} 分
     </div>
   </div>`;
 
   const $ = (id) => el.querySelector('#' + id);
+
+  /* ---------- R5[W4]：字段级错误可播报 ----------
+   * toast（role=status）负责全局反馈；此处把具体错误同时写入提交按钮前的
+   * role=alert 容器（读屏立即播报）+ 给出错字段挂 aria-invalid 并移焦过去，
+   * 读屏用户能知道"错在哪、该改哪个框"。重新输入即清除。 */
+  function fieldError(input, msg) {
+    if (input) {
+      input.setAttribute('aria-invalid', 'true');
+      try { input.focus({ preventScroll: false }); } catch { input.focus(); }
+    }
+    const box = $('pub-err');
+    if (box) box.textContent = msg;
+    UI.toast(msg);
+  }
+  el.addEventListener('input', (e) => {
+    if (!e.target.matches('input, select, textarea')) return;
+    e.target.removeAttribute('aria-invalid');
+    const box = $('pub-err');
+    if (box) box.textContent = '';
+  });
 
   el.querySelectorAll('[data-cat]').forEach((b) => {
     b.onclick = () => {
@@ -231,11 +267,41 @@ App.register('publish', async (el, _seg, query) => {
     const btn = $('btn-publish');
     if (btn.disabled) return;
     btn.disabled = true;
-    if (!state.category) { btn.disabled = false; return UI.toast('先选一个搭子类型吧'); }
+    if (!state.category) { btn.disabled = false; return fieldError(el.querySelector('[data-cat]'), '先选一个搭子类型吧'); }
     const title = $('f-title').value.trim();
-    if (!title) { btn.disabled = false; return UI.toast('标题不能为空'); }
+    if (!title) { btn.disabled = false; return fieldError($('f-title'), '标题不能为空'); }
     const city = $('f-city').value.trim();
-    if (!city) { btn.disabled = false; return UI.toast('请填写城市'); }
+    if (!city) { btn.disabled = false; return fieldError($('f-city'), '请填写城市'); }
+
+    /* ---------- R5 时间语义（review-time-r5 TS-1）：结构化 meet_at ----------
+     * 日期/时间任一填写即组装 meet_at（本地时区墙钟 new Date('YYYY-MM-DDTHH:mm')）；
+     * 校验：两项必须成对出现，且须在未来 5 分钟～365 天内；周期性（每周/每天）
+     * 传 meet_repeat，meet_at 为首次开场时间。未填则不带任何时间字段，走纯文本老路径。 */
+    const dateV = $('f-date').value;
+    const timeV = $('f-time2').value;
+    const repeatV = $('f-repeat').value;
+    let meetAt = null;
+    if (dateV || timeV) {
+      if (!dateV || !timeV) {
+        btn.disabled = false;
+        return fieldError(dateV ? $('f-time2') : $('f-date'), '开始日期与开始时间需要同时填写');
+      }
+      const ts = new Date(`${dateV}T${timeV}`).getTime();
+      if (!Number.isFinite(ts)) {
+        btn.disabled = false;
+        return fieldError($('f-date'), '开始时间不合法，请重新选择');
+      }
+      if (ts < Date.now() + 5 * 60 * 1000) {
+        btn.disabled = false;
+        return fieldError($('f-time2'), '开始时间至少要在 5 分钟后');
+      }
+      if (ts > Date.now() + 365 * 86400000) {
+        btn.disabled = false;
+        return fieldError($('f-date'), '开始时间不能晚于一年（365 天）后');
+      }
+      meetAt = ts;
+    }
+
     try {
       const p = await API.post('/posts', {
         category: state.category, title,
@@ -244,6 +310,8 @@ App.register('publish', async (el, _seg, query) => {
         meet_time: $('f-time').value.trim(),
         need_count: state.need_count, fee_mode: state.fee_mode,
         gender_req: state.gender_req, requirements: $('f-req').value.trim(),
+        // 契约：BE 接受可选 meet_at(epoch ms)/meet_repeat；未落地时未知字段被忽略，不影响纯文本路径
+        ...(meetAt ? { meet_at: meetAt, meet_repeat: repeatV } : {}),
       });
       UI.toast('发布成功，等搭子来找你');
       try { await uploadImages(p.id); } catch { /* 配图上传失败不阻塞 */ }

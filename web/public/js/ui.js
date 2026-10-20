@@ -8,6 +8,10 @@ const UI = (() => {
     if (!wrap) {
       wrap = document.createElement('div');
       wrap.id = 'toast-wrap';
+      // R5[W1]：toast 是全站表单错误/操作结果的唯一出口，容器挂 live 语义后
+      // 每条新 toast 都会进入读屏播报队列（polite：不打断当前朗读）
+      wrap.setAttribute('role', 'status');
+      wrap.setAttribute('aria-live', 'polite');
       document.body.appendChild(wrap);
     }
     const now = Date.now();
@@ -62,6 +66,19 @@ const UI = (() => {
     api.close = close;
     function onKey(e) {
       if (e.key === 'Escape' && sheetStack[sheetStack.length - 1] === api) close();
+      // R5[W3]：Tab 焦点圈闭——aria-modal=true 语义下物理 Tab 仍可走出 dialog
+      // 操作被遮罩盖住的背景元素；这里把 Tab 循环限制在 sheet 内可聚焦元素之间
+      if (e.key === 'Tab' && sheetStack[sheetStack.length - 1] === api) {
+        const focusables = [...mask.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+          .filter((n) => !n.disabled && n.offsetParent !== null);
+        if (!focusables.length) return;
+        e.preventDefault();
+        const i = focusables.indexOf(document.activeElement);
+        const next = e.shiftKey
+          ? focusables[(i - 1 + focusables.length) % focusables.length]
+          : focusables[(i + 1) % focusables.length];
+        next.focus();
+      }
     }
     if (!opts.locked) {
       mask.addEventListener('click', (e) => { if (e.target === mask) close(); });
@@ -119,6 +136,33 @@ const UI = (() => {
   function hhmm(ts) {
     const d = new Date(ts);
     return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  }
+
+  /* ---------- R5 时间语义（review-time-r5）：meet_at 结构化展示 ----------
+   * meetText(p)：卡片/列表用的时间文案。p.meet_at（epoch ms）存在时输出
+   * 结构化日期（"10/28 周六 11:30"，设备本地时区），否则回退 meet_time 原文——
+   * 老帖/BE 未返回 meet_at 时零影响。返回已转义的安全文本。 */
+  function meetText(p) {
+    if (!p?.meet_at) return esc(p?.meet_time || '');
+    const d = new Date(p.meet_at);
+    const week = '周' + '日一二三四五六'[d.getDay()];
+    return `${d.getMonth() + 1}/${d.getDate()} ${week} ${hhmm(p.meet_at)}`;
+  }
+
+  // dayLabel(ts)：聊天气泡流的日期分隔条文案——今天 / 昨天 / M月D日（按设备本地日历日）
+  function dayLabel(ts) {
+    const d = new Date(ts);
+    const t = new Date();
+    const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+    if (sameDay(d, t)) return '今天';
+    if (sameDay(d, new Date(t.getTime() - 86400000))) return '昨天';
+    return `${d.getMonth() + 1}月${d.getDate()}日`;
+  }
+
+  // dayKey(ts)：日历日稳定键（跨天判断用，避免每次拼接 label 比较）
+  function dayKey(ts) {
+    const d = new Date(ts);
+    return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
   }
 
   // ---------- 头像（PC-04）：<img> 带 onerror 三级降级，防死循环 ----------
@@ -312,7 +356,9 @@ const UI = (() => {
 
     const bits = [];
     if (p.city) bits.push(`${icon('location', 11)}<span>${esc(p.city)}</span>`);
-    if (p.meet_time) bits.push(`${icon('clock', 11)}<span>${esc(p.meet_time)}</span>`);
+    // R5 时间语义：meet_at 存在时显示结构化日期（如"10/28 周六 11:30"），否则回退 meet_time 原文
+    const meetTxt = meetText(p);
+    if (meetTxt) bits.push(`${icon('clock', 11)}<span>${meetTxt}</span>`);
     // H7：满员帖不再显示"还缺 0 人"，改为灰色"已满员"pill
     if (typeof p.need_count === 'number') {
       const lack = Math.max(0, p.need_count - (p.approved_count || 0));
@@ -354,5 +400,5 @@ const UI = (() => {
     return `<div class="wf">${Array.from({ length: n }, (_, i) => `<div class="wf-item"><div class="skeleton" style="height:${hs[i % hs.length]}px"></div></div>`).join('')}</div>`;
   }
 
-  return { toast, sheet, confirm, esc, timeAgo, hhmm, avatarImg, avatarHTML, imgFallback, genderBadge, creditLabel, empty, loading, requireLogin, icon, catIcon, CAT_ICONS, starRow, coverOf, aspectOf, pinCard, wfSkeleton };
+  return { toast, sheet, confirm, esc, timeAgo, hhmm, meetText, dayLabel, dayKey, avatarImg, avatarHTML, imgFallback, genderBadge, creditLabel, empty, loading, requireLogin, icon, catIcon, CAT_ICONS, starRow, coverOf, aspectOf, pinCard, wfSkeleton };
 })();

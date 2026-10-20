@@ -270,9 +270,16 @@ export function reportRouter(Router) {
   r.get('/mine', requireAuth, (req, res) => {
     const rows = db.prepare('SELECT * FROM reports WHERE reporter_id = ? ORDER BY id DESC LIMIT 50').all(req.user.id);
     // C7（R3完整性）：补充处理进度——resolved 时间与处理动作说明（未处理为 null），不再"已收到举报"后黑盒
+    // [API-8] 字段白名单：此前 `...r` 整行展开把 reporter_id/resolve_action 等内部字段带到客户端，现只出约定字段
     const ACTION_TEXT = { warn: '已警告对方', ban: '已封禁/下架', dismiss: '未发现违规，举报不实' };
     res.json(ok(rows.map((r) => ({
-      ...r,
+      id: r.id,
+      target_type: r.target_type,
+      target_id: r.target_id,
+      reason: r.reason,
+      detail: r.detail,
+      status: r.status,
+      created_at: r.created_at,
       resolved_at: r.resolved_at ?? null,
       action_text: r.status === 'resolved' && r.resolve_action
         ? (ACTION_TEXT[r.resolve_action] || '已处理')

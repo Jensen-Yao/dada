@@ -252,5 +252,8 @@ authRouter.get('/me', requireAuth, (req, res) => {
       AND ((c2.user_a = ?) OR (c2.user_b = ?))
   `).get(u.id, u.id, u.id).c;
   pu.warnings = u.warnings;
+  // [API-8] is_admin 显式透出：FE"我的"页运营后台入口（me.js/admin.js）依赖该字段——
+  // 此前 /me 不返回 is_admin，管理员入口永远不可达（R5 无障碍批评发现的看板不可达根因）
+  pu.is_admin = !!u.is_admin;
   res.json(ok(pu));
 });

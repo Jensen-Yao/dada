@@ -1426,7 +1426,8 @@ test('JWT密钥：文件密钥生成与跨进程复用 + 伪造默认密钥 toke
     let out = '';
     p.stdout.on('data', (d) => (out += d));
     p.on('error', reject);
-    p.on('exit', () => resolve(out.trim()));
+    // R5 起 db.js 启动时会打印 schema 版本行 → 取 stdout 最后一行作为 token
+    p.on('exit', () => resolve(out.trim().split('\n').pop()));
   });
   const cross = verifyToken(childToken);
   assert.ok(cross, '子进程签发的 token 应可被本进程验证（两次进程读同一密钥文件）');
@@ -2123,6 +2124,230 @@ test('R4-O5 意见反馈：提交/校验/admin列表/处理留痕/通知', async
   const fbNotif = eNotifs.json.data.find((n) => n.type === 'feedback_result' && n.data && n.data.feedback_id === mine.id);
   assert.ok(fbNotif, 'submitter notified of resolution');
   assert.ok(fbNotif.body.includes('已收到，规划中'));
+});
+
+// ==================== R5 修复回归（db-r5 / api-r5 / time-r5 后端条目） ====================
+
+test('R5-API2 未匹配 /api/* 返回 JSON 404（此前是 Express 默认 HTML）', async () => {
+  const r = await api('GET', '/api/nonexistent');
+  assert.equal(r.status, 404);
+  assert.ok(r.json, 'body must be parseable JSON');
+  assert.equal(r.json.error, '接口不存在');
+  // 路径匹配但方法不支持，同样落 JSON 404 兜底（posts 路由无 DELETE /:id）
+  const r2 = await api('DELETE', '/api/posts/1');
+  assert.equal(r2.status, 404);
+  assert.equal(r2.json.error, '接口不存在');
+});
+
+test('R5-API8 /cities 白名单：返回 {city,count}，不再泄漏 SQL 别名 c', async () => {
+  const r = await api('GET', '/api/cities');
+  assert.equal(r.status, 200);
+  assert.ok(Array.isArray(r.json.data) && r.json.data.length > 0);
+  for (const row of r.json.data) {
+    assert.equal(typeof row.city, 'string', 'row.city is string');
+    assert.equal(typeof row.count, 'number', 'row.count is number');
+    assert.equal('c' in row, false, 'SQL alias c must not leak');
+    assert.equal(Object.keys(row).length, 2, 'whitelist: only city+count');
+  }
+});
+
+test('R5-API8 /reports/mine 白名单：不外泄 reporter_id/resolve_action 等内部字段', async () => {
+  // 独立新账号举报，避开既有测试的 24h 重复举报 409
+  const reg1 = await api('POST', '/api/auth/register', { username: 'r5_reporter', password: '123456', nickname: 'R5举报人', city: '北京' });
+  const reg2 = await api('POST', '/api/auth/register', { username: 'r5_target', password: '123456', nickname: 'R5被举报人', city: '北京' });
+  const reporter = reg1.json.data;
+  const rep = await api('POST', `/api/users/${reg2.json.data.user.id}/report`, { reason: '骚扰', detail: 'R5 白名单用例' }, reporter.token);
+  assert.equal(rep.status, 200);
+  const mine = await api('GET', '/api/reports/mine', null, reporter.token);
+  assert.equal(mine.status, 200);
+  const row = mine.json.data.find((x) => x.detail === 'R5 白名单用例');
+  assert.ok(row, 'report visible to reporter');
+  for (const k of ['id', 'target_type', 'target_id', 'reason', 'detail', 'status', 'created_at', 'resolved_at', 'action_text']) {
+    assert.ok(k in row, `whitelist field ${k} present`);
+  }
+  for (const k of ['reporter_id', 'resolve_action']) {
+    assert.equal(k in row, false, `internal field ${k} must not leak`);
+  }
+});
+
+test('R5-API8 /auth/me 返回 is_admin（管理员 true / 普通用户 false）', async () => {
+  const admin = await api('GET', '/api/auth/me', null, tokenAdmin);
+  assert.equal(admin.status, 200);
+  assert.equal(admin.json.data.is_admin, true, 'admin sees is_admin=true');
+  const normal = await api('GET', '/api/auth/me', null, tokenA);
+  assert.equal(normal.json.data.is_admin, false, 'normal user sees is_admin=false');
+});
+
+test('R5-TS1 meet_at 结构化：校验/入库/透传/周期豁免/编辑一致', async () => {
+  const base = { category: 'food', title: 'R5结构化时间局', content: 'x', city: '北京' };
+  // 过近（< now+5min）→ 400
+  const tooSoon = await api('POST', '/api/posts', { ...base, title: 'R5过近局', meet_at: Date.now() + 60_000 }, tokenA);
+  assert.equal(tooSoon.status, 400);
+  assert.equal(tooSoon.json.error, '开始时间需在5分钟到一年之内');
+  // 过远（> now+365d）→ 400
+  const tooFar = await api('POST', '/api/posts', { ...base, title: 'R5过远局', meet_at: Date.now() + 400 * 86400000 }, tokenA);
+  assert.equal(tooFar.status, 400);
+  assert.equal(tooFar.json.error, '开始时间需在5分钟到一年之内');
+  // 非数字 → 400
+  const notNum = await api('POST', '/api/posts', { ...base, title: 'R5非数字局', meet_at: '本周六 11:30' }, tokenA);
+  assert.equal(notNum.status, 400);
+  // 合法值入库并透传
+  const at = Date.now() + 2 * 3600_000;
+  const good = await api('POST', '/api/posts', { ...base, title: 'R5合法时间局', meet_at: at }, tokenA);
+  assert.equal(good.status, 200);
+  assert.equal(good.json.data.meet_at, at, 'meet_at stored as provided epoch ms');
+  assert.equal(good.json.data.meet_repeat, null);
+  // 周期局：repeat=weekly 豁免未来校验（锚点可以是过去）
+  const weekly = await api('POST', '/api/posts', { ...base, title: 'R5每周局', meet_at: Date.now() - 7 * 86400000, meet_repeat: 'weekly' }, tokenA);
+  assert.equal(weekly.status, 200, 'weekly repeat exempts future check');
+  assert.equal(weekly.json.data.meet_repeat, 'weekly');
+  // 周期局可以只有 repeat 没有 meet_at
+  const weeklyOnly = await api('POST', '/api/posts', { ...base, title: 'R5纯周期局', meet_repeat: 'daily' }, tokenA);
+  assert.equal(weeklyOnly.status, 200);
+  assert.equal(weeklyOnly.json.data.meet_at, null);
+  // 非法 repeat → 400
+  const badRepeat = await api('POST', '/api/posts', { ...base, title: 'R5非法周期局', meet_repeat: 'monthly' }, tokenA);
+  assert.equal(badRepeat.status, 400);
+  // 编辑：合法新值生效；非法值 400
+  const at2 = Date.now() + 3 * 3600_000;
+  const edit = await api('PUT', `/api/posts/${good.json.data.id}`, { meet_at: at2 }, tokenA);
+  assert.equal(edit.status, 200);
+  assert.equal(edit.json.data.meet_at, at2);
+  const badEdit = await api('PUT', `/api/posts/${good.json.data.id}`, { meet_at: Date.now() + 10_000 }, tokenA);
+  assert.equal(badEdit.status, 400);
+  assert.equal(badEdit.json.error, '开始时间需在5分钟到一年之内');
+  // 创建/编辑 slice 一致性：meet_time 统一 ≤30、location_name ≤50（此前编辑路径 1000）
+  const longEdit = await api('PUT', `/api/posts/${good.json.data.id}`, {
+    meet_time: 'X'.repeat(31), location_name: 'Y'.repeat(51),
+  }, tokenA);
+  assert.equal(longEdit.status, 200);
+  assert.equal(longEdit.json.data.meet_time.length, 30, 'meet_time edit clamps to 30 like create');
+  assert.equal(longEdit.json.data.location_name.length, 50, 'location_name edit clamps to 50 like create');
+});
+
+test('R5-TS2 过期双轨 + join 入口时间守卫：meet_at+24h / repeat 永续 / NULL 维持14天', async () => {
+  const { db } = await import('../src/db.js');
+  const { runJobs } = await import('../src/jobs.js');
+  const mk = async (title, body) => {
+    const r = await api('POST', '/api/posts', { category: 'sports', title, content: 'x', city: '北京', ...body }, tokenA);
+    assert.equal(r.status, 200);
+    return r.json.data.id;
+  };
+  // ① 有 meet_at 无 repeat：活动过后 24h 才过期；入口守卫即刻拒绝新申请
+  const pastId = await mk('R5已散场的局', { meet_at: Date.now() + 2 * 3600_000 });
+  db.prepare('UPDATE posts SET meet_at = ? WHERE id = ?').run(Date.now() - 25 * 3600_000, pastId); // 回拨成已散场
+  const join = await api('POST', `/api/posts/${pastId}/join`, { message: '散场后报名' }, tokenB);
+  assert.equal(join.status, 400);
+  assert.equal(join.json.error, '该搭局时间已过', 'join guard rejects posts whose meet_at passed 24h ago');
+  assert.equal(runJobs().expired >= 1, true, 'past meet_at post expired by job');
+  assert.equal(db.prepare('SELECT status FROM posts WHERE id = ?').get(pastId).status, 'expired');
+  // 未过缓冲（活动过后 <24h）不过期
+  const soonId = await mk('R5刚散场的局', { meet_at: Date.now() + 3600_000 });
+  db.prepare('UPDATE posts SET meet_at = ? WHERE id = ?').run(Date.now() - 2 * 3600_000, soonId);
+  runJobs();
+  assert.equal(db.prepare('SELECT status FROM posts WHERE id = ?').get(soonId).status, 'open', 'within 24h grace not expired');
+  // ② 周期局（repeat）永不过期——即使 meet_at 在过去、发布超 14 天
+  const weeklyId = await mk('R5每周跑步局', { meet_at: Date.now() - 7 * 86400000, meet_repeat: 'weekly' });
+  db.prepare('UPDATE posts SET created_at = ? WHERE id = ?').run(Date.now() - 20 * 86400000, weeklyId);
+  runJobs();
+  assert.equal(db.prepare('SELECT status FROM posts WHERE id = ?').get(weeklyId).status, 'open', 'repeat post never expires');
+  // ③ 无 meet_at：维持 14 天规则
+  const legacyId = await mk('R5无结构化时间局', {});
+  db.prepare('UPDATE posts SET created_at = ? WHERE id = ?').run(Date.now() - 15 * 86400000, legacyId);
+  runJobs();
+  assert.equal(db.prepare('SELECT status FROM posts WHERE id = ?').get(legacyId).status, 'expired', 'no meet_at keeps 14-day rule');
+});
+
+test('R5-D1 schema 版本：user_version 落库为 1，jobs 每日 WAL checkpoint', async () => {
+  const { db } = await import('../src/db.js');
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 1, 'user_version set after migrations');
+  const { runJobs } = await import('../src/jobs.js');
+  const summary = runJobs();
+  assert.equal(typeof summary.checkpoint, 'boolean', 'runJobs exposes checkpoint subtask');
+  // TRUNCATE 模式可用且幂等（WAL 收缩进主文件）
+  assert.doesNotThrow(() => db.exec('PRAGMA wal_checkpoint(TRUNCATE);'));
+});
+
+test('R5-D1 迁移动态列：users 清单外的中间版本列迁移后保留（不再静默丢列）', async () => {
+  const os = await import('node:os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dada-mig-'));
+  const dbPath = path.join(dir, 'old.sqlite');
+  // ① 子进程造一个"v2.7 时代 + 中间版本 ALTER 加过 loyalty 列"的老库（status CHECK 无 deleted）
+  const seedOld = `
+    import('node:sqlite').then(({ DatabaseSync }) => {
+      const db = new DatabaseSync(${JSON.stringify(dbPath)});
+      db.exec(\`CREATE TABLE users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        nickname TEXT NOT NULL,
+        avatar TEXT DEFAULT NULL,
+        gender TEXT NOT NULL DEFAULT 'secret' CHECK (gender IN ('male','female','secret')),
+        birth_year INTEGER DEFAULT NULL,
+        city TEXT NOT NULL DEFAULT '',
+        district TEXT DEFAULT '',
+        school TEXT DEFAULT '',
+        occupation TEXT DEFAULT '',
+        mbti TEXT DEFAULT '',
+        bio TEXT DEFAULT '',
+        tags TEXT NOT NULL DEFAULT '[]',
+        verify_student INTEGER NOT NULL DEFAULT 0,
+        verify_real INTEGER NOT NULL DEFAULT 0,
+        verify_pending INTEGER NOT NULL DEFAULT 0,
+        is_admin INTEGER NOT NULL DEFAULT 0,
+        credit INTEGER NOT NULL DEFAULT 600,
+        warnings INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','banned')),
+        created_at INTEGER NOT NULL,
+        last_active_at INTEGER NOT NULL
+      )\`);
+      db.prepare("INSERT INTO users (username, password_hash, nickname, status, created_at, last_active_at) VALUES ('u1','h','n1','active',111,222)").run();
+      db.exec('ALTER TABLE users ADD COLUMN loyalty INTEGER NOT NULL DEFAULT 5');
+      db.prepare("UPDATE users SET loyalty = 9 WHERE username = 'u1'").run();
+      db.close();
+    });`;
+  await new Promise((resolve, reject) => {
+    const p = spawn(process.execPath, ['-e', seedOld], { stdio: 'inherit' });
+    p.on('exit', (c) => (c === 0 ? resolve() : reject(new Error('seeding old db failed'))));
+  });
+  // ② 子进程用当前代码跑迁移：loyalty 值 9 必须保真携带，且 user_version=1
+  const migrate = `
+    import(${JSON.stringify(path.join(ROOT, 'src', 'db.js'))}).then(({ db }) => {
+      const row = db.prepare("SELECT loyalty, status FROM users WHERE username = 'u1'").get();
+      if (!row || row.loyalty !== 9) { console.error('FAIL: loyalty 列丢失', row); process.exit(1); }
+      if (db.prepare("SELECT COUNT(*) c FROM users").get().c !== 1) { console.error('FAIL: 行数不符'); process.exit(1); }
+      if (db.prepare('PRAGMA user_version').get().user_version !== 1) { console.error('FAIL: user_version != 1'); process.exit(1); }
+      console.log('dynamic column carried: loyalty=9');
+      process.exit(0);
+    });`;
+  await new Promise((resolve) => {
+    const p = spawn(process.execPath, ['-e', migrate], { env: { ...process.env, DADA_DB: dbPath }, stdio: 'inherit' });
+    p.on('exit', (c) => {
+      assert.equal(c, 0, 'migration must carry out-of-list column and set user_version');
+      resolve();
+    });
+  });
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('R5-D1 损坏库友好启动：拒绝启动并给出恢复指引（非裸崩溃）', async () => {
+  const os = await import('node:os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dada-corrupt-'));
+  const dbPath = path.join(dir, 'corrupt.sqlite');
+  fs.writeFileSync(dbPath, Buffer.from('X' + 'A'.repeat(511))); // 破坏文件头 magic（SQLite -> XQLite...）
+  const out = [];
+  await new Promise((resolve) => {
+    const p = spawn(process.execPath, [path.join(ROOT, 'src', 'index.js')], {
+      env: { ...process.env, DADA_DB: dbPath, DADA_PORT: '3998' },
+    });
+    p.stdout.on('data', (d) => out.push(String(d)));
+    p.stderr.on('data', (d) => out.push(String(d)));
+    p.on('exit', (c) => { assert.equal(c, 1, 'corrupt db must exit(1)'); resolve(); });
+  });
+  const text = out.join('');
+  assert.ok(text.includes('数据库文件可能已损坏'), 'must explain corruption');
+  assert.ok(text.includes('备份'), 'must point to backup recovery');
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 console.log('\n✅ 全部 API 测试通过');
